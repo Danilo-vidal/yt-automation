@@ -27,8 +27,8 @@ def executar_pipeline():
 
     print(f"[IA] Notícia escolhida (score {resultado['score_viral']}): {resultado['titulo_youtube']}")
 
-    if resultado["score_viral"] < 7:
-     print("[WARN] Score baixo, mas gerando mesmo assim.")
+    if resultado["score_viral"] < 5:
+     print("[WARN] Score baixo, mas continuando gerando mesmo assim.")
     return
 
     print("[THUMB] Gerando thumbnail...")
