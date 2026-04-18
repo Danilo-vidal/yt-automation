@@ -16,9 +16,9 @@ def executar_pipeline():
     print("\n[PIPELINE] Iniciando execução...\n")
 
     noticias = coletar_noticias()
-    print("[WARN] Nenhuma nova. Reutilizando últimas.")
-    from coletor_noticias import carregar_noticias_antigas
-    noticias = carregar_noticias_antigas()
+    if not noticias:
+        print("[INFO] Nenhuma notícia encontrada.")
+        return
 
     print(f"[COLETA] {len(noticias)} notícias coletadas")
 
