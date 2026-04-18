@@ -15,10 +15,15 @@ def carregar_fonte(tamanho: int):
 
 
 def escolher_imagem_base():
-    imagens = list(ASSETS_DIR.glob("*.jpg")) + list(ASSETS_DIR.glob("*.png")) + list(ASSETS_DIR.glob("*.jpeg"))
-    if not imagens:
-        raise RuntimeError("Nenhuma imagem em assets/ para gerar thumbnail.")
-    return imagens[0]
+    candidatas = (
+        list(Path("videos_gerados").glob("img_*.jpg")) +
+        list(ASSETS_DIR.glob("*.jpg")) +
+        list(ASSETS_DIR.glob("*.png")) +
+        list(ASSETS_DIR.glob("*.jpeg"))
+    )
+    if not candidatas:
+        raise RuntimeError("Nenhuma imagem disponível para thumbnail.")
+    return candidatas[0]
 
 
 def gerar_thumbnail(headline: str, output_path: str = "videos_gerados/thumb.jpg"):
