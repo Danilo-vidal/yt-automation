@@ -17,6 +17,7 @@ jobs:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       OPENAI_MODEL: ${{ secrets.OPENAI_MODEL }}
       PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+      
 
     steps:
       - name: Checkout do repositório
