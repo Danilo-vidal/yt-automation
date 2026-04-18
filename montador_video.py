@@ -14,17 +14,23 @@ ASSETS_DIR = Path("assets")
 W, H = 1080, 1920
 OUTPUT_DIR.mkdir(exist_ok=True)
 
-def buscar_imagens(query: str, quantidade: int = 5) -> List[Path]:
+def buscar_imagens(query: str, quantidade: int = 5):
+    print(f"[IMAGENS] Query: {query}")
+    print(f"[IMAGENS] PEXELS_API_KEY presente? {'SIM' if PEXELS_API_KEY else 'NAO'}")
+
     caminhos = []
 
     if PEXELS_API_KEY:
         try:
+            print("[IMAGENS] Buscando no Pexels...")
             url = "https://api.pexels.com/v1/search"
             headers = {"Authorization": PEXELS_API_KEY}
-            params = {"query": query, "per_page": quantidade, "orientation": "landscape"}
+            params = {"query": query, "per_page": quantidade, "orientation": "portrait"}
             resp = requests.get(url, headers=headers, params=params, timeout=20)
+            print(f"[IMAGENS] Status Pexels: {resp.status_code}")
             resp.raise_for_status()
             fotos = resp.json().get("photos", [])
+            print(f"[IMAGENS] Fotos retornadas: {len(fotos)}")
 
             for i, foto in enumerate(fotos):
                 img_url = foto["src"]["large2x"]
@@ -33,15 +39,16 @@ def buscar_imagens(query: str, quantidade: int = 5) -> List[Path]:
                 img_resp.raise_for_status()
                 img_path.write_bytes(img_resp.content)
                 caminhos.append(img_path)
+
+            print(f"[IMAGENS] Baixadas do Pexels: {len(caminhos)}")
+
         except Exception as e:
             print(f"[WARN] Falha no Pexels, usando imagens locais. Detalhe: {e}")
 
     if not caminhos:
         locais = list(ASSETS_DIR.glob("*.jpg")) + list(ASSETS_DIR.glob("*.png")) + list(ASSETS_DIR.glob("*.jpeg"))
+        print(f"[IMAGENS] Usando assets locais: {len(locais)}")
         caminhos.extend(locais[:quantidade])
-
-    if not caminhos:
-        raise RuntimeError("Nenhuma imagem disponível. Coloque imagens em assets/ ou configure PEXELS_API_KEY.")
 
     return caminhos
 
