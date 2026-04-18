@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+.env
+client_secret.json
+youtube_token.json
+audio.mp3
+audio.srt
+roteiro_gerado.json
+noticias_vistas.json
+videos_gerados/
+*.pyc
