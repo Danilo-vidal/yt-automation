@@ -1,18 +1,47 @@
 import os
+import base64
 import subprocess
 from pathlib import Path
 from datetime import datetime
 from typing import List
 
 import requests
+from bs4 import BeautifulSoup
 from PIL import Image, ImageDraw, ImageFont
 import mutagen.mp3
+from openai import OpenAI
+
 
 PEXELS_API_KEY = os.getenv("PEXELS_API_KEY")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
 OUTPUT_DIR = Path("videos_gerados")
 ASSETS_DIR = Path("assets")
 W, H = 1080, 1920
+
 OUTPUT_DIR.mkdir(exist_ok=True)
+
+client = OpenAI(api_key=OPENAI_API_KEY)
+
+
+def extrair_contexto_da_materia(url: str, max_chars: int = 1200) -> str:
+    try:
+        resp = requests.get(
+            url,
+            timeout=15,
+            headers={"User-Agent": "Mozilla/5.0"}
+        )
+        resp.raise_for_status()
+
+        soup = BeautifulSoup(resp.text, "html.parser")
+        paragrafos = [p.get_text(" ", strip=True) for p in soup.find_all("p")]
+        texto = " ".join(paragrafos)
+        texto = " ".join(texto.split())
+
+        return texto[:max_chars]
+    except Exception as e:
+        print(f"[CONTEXTO] Falha ao extrair matéria: {e}")
+        return ""
 
 
 def gerar_query_imagem(noticia: dict):
@@ -36,6 +65,57 @@ def gerar_query_imagem(noticia: dict):
         return "protest crowd tension street demonstration"
 
     return "breaking news dramatic scene"
+
+
+def gerar_prompt_visual(noticia: dict, contexto_extra: str) -> str:
+    titulo = noticia.get("titulo", "")
+    resumo = noticia.get("resumo", "")
+
+    return f"""
+Crie uma imagem em estilo fotojornalístico realista, vertical, para vídeo curto de notícias.
+
+Tema principal:
+{titulo}
+
+Resumo:
+{resumo}
+
+Contexto adicional:
+{contexto_extra}
+
+Diretrizes visuais:
+- cena coerente com notícia política ou factual
+- clima jornalístico
+- composição vertical forte
+- elementos visuais compatíveis com o tema
+- sem texto na imagem
+- sem letras
+- sem logos
+- sem marca d'água
+- aparência realista
+- iluminação cinematográfica
+- estilo foto de reportagem
+"""
+
+
+def gerar_imagem_ia_para_video(prompt: str, output_path: Path) -> Path:
+    if not OPENAI_API_KEY:
+        raise RuntimeError("OPENAI_API_KEY não configurada para geração de imagem IA.")
+
+    print("[IMG IA] Gerando imagem contextual para o vídeo...")
+
+    img = client.images.generate(
+        model="gpt-image-1",
+        prompt=prompt,
+        size="1024x1536"
+    )
+
+    b64 = img.data[0].b64_json
+    img_bytes = base64.b64decode(b64)
+    output_path.write_bytes(img_bytes)
+
+    print(f"[IMG IA] Imagem salva em: {output_path}")
+    return output_path
 
 
 def buscar_imagens(query: str, quantidade: int = 5):
@@ -75,18 +155,54 @@ def buscar_imagens(query: str, quantidade: int = 5):
             print(f"[IMAGENS] Baixadas do Pexels: {len(caminhos)}")
 
         except Exception as e:
-            print(f"[WARN] Falha no Pexels, usando imagens locais. Detalhe: {e}")
-
-    if not caminhos:
-        locais = (
-            list(ASSETS_DIR.glob("*.jpg"))
-            + list(ASSETS_DIR.glob("*.png"))
-            + list(ASSETS_DIR.glob("*.jpeg"))
-        )
-        print(f"[IMAGENS] Usando assets locais: {len(locais)}")
-        caminhos.extend(locais[:quantidade])
+            print(f"[WARN] Falha no Pexels, usando fallback. Detalhe: {e}")
 
     return caminhos
+
+
+def buscar_imagens_locais(quantidade: int = 5):
+    locais = (
+        list(ASSETS_DIR.glob("*.jpg"))
+        + list(ASSETS_DIR.glob("*.png"))
+        + list(ASSETS_DIR.glob("*.jpeg"))
+    )
+    print(f"[IMAGENS] Usando assets locais: {len(locais)}")
+    return locais[:quantidade]
+
+
+def obter_frames_visuais(noticia: dict, quantidade_pexels: int = 4):
+    frames = []
+
+    url = noticia.get("url", "") or noticia.get("link", "")
+    contexto_extra = extrair_contexto_da_materia(url) if url else ""
+
+    prompt_visual = gerar_prompt_visual(noticia, contexto_extra)
+    img_ia_path = OUTPUT_DIR / "img_ia_0.jpg"
+
+    try:
+        gerar_imagem_ia_para_video(prompt_visual, img_ia_path)
+        frames.append(img_ia_path)
+    except Exception as e:
+        print(f"[IMG IA] Falha ao gerar imagem IA: {e}")
+
+    query = gerar_query_imagem(noticia)
+    imagens_pexels = buscar_imagens(query, quantidade=quantidade_pexels)
+    frames.extend(imagens_pexels)
+
+    if not frames:
+        frames.extend(buscar_imagens_locais(quantidade=5))
+
+    # remove duplicados preservando ordem
+    unicos = []
+    vistos = set()
+    for p in frames:
+        p_str = str(p)
+        if p_str not in vistos:
+            vistos.add(p_str)
+            unicos.append(Path(p))
+
+    print(f"[IMAGENS] Total final de frames visuais: {len(unicos)}")
+    return unicos
 
 
 def formatar_tempo_srt(segundos: float) -> str:
@@ -129,7 +245,7 @@ def gerar_srt_simples(texto: str, audio_path: Path) -> Path:
         grupos = [texto]
 
     dur_por_grupo = max((duracao / len(grupos)) * 0.90, 0.55)
-    adiantamento = 0.55
+    adiantamento = 0.48
 
     srt_path = audio_path.with_suffix(".srt")
 
@@ -323,17 +439,17 @@ def concatenar_video(corpo_path: Path) -> Path:
 def montar_video(noticia: dict, audio_path: Path) -> Path:
     duracao = mutagen.mp3.MP3(str(audio_path)).info.length
 
-    query = gerar_query_imagem(noticia)
-    print(f"[VIDEO] Query final de imagens: {query}")
-
-    frames_brutos = buscar_imagens(query, quantidade=5)
+    frames_brutos = obter_frames_visuais(noticia, quantidade_pexels=4)
     if not frames_brutos:
         raise RuntimeError("Nenhuma imagem encontrada para montar o vídeo.")
 
     srt_texto = noticia.get("roteiro_legenda") or noticia.get("resumo") or noticia.get("titulo")
     srt_path = gerar_srt_simples(srt_texto, audio_path)
 
-    frames_compostos = [compor_frame(img, noticia["titulo"], i) for i, img in enumerate(frames_brutos)]
+    frames_compostos = [
+        compor_frame(img, noticia.get("titulo", "Notícia"), i)
+        for i, img in enumerate(frames_brutos)
+    ]
 
     corpo = montar_slideshow(frames_compostos, audio_path, srt_path, duracao)
     corpo = adicionar_trilha(corpo)
