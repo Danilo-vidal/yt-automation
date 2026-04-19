@@ -14,6 +14,28 @@ ASSETS_DIR = Path("assets")
 W, H = 1080, 1920
 OUTPUT_DIR.mkdir(exist_ok=True)
 
+def gerar_query_imagem(noticia: dict):
+    titulo = (noticia.get("titulo") or "").lower()
+    resumo = (noticia.get("resumo") or "").lower()
+
+    texto = f"{titulo} {resumo}"
+
+    # palavras-chave visuais
+    if any(p in texto for p in ["governo", "lula", "bolsonaro", "presidente", "política"]):
+        return "brazil politics protest congress people"
+
+    if any(p in texto for p in ["crime", "polícia", "assalto", "prisão"]):
+        return "police arrest crime investigation"
+
+    if any(p in texto for p in ["guerra", "ataque", "militar"]):
+        return "war military conflict soldiers"
+
+    if any(p in texto for p in ["economia", "inflação", "dinheiro"]):
+        return "economy money crisis business graph"
+
+    # fallback
+    return "breaking news dramatic scene"
+
 
 def buscar_imagens(query: str, quantidade: int = 5):
     print(f"[IMAGENS] Query: {query}")
@@ -92,7 +114,7 @@ def gerar_srt_simples(texto: str, audio_path: Path) -> Path:
 
     # legenda ligeiramente mais “adiantada” para acompanhar melhor o TTS
     dur_por_grupo = max((duracao / len(grupos)) * 0.92, 0.7)
-    adiantamento = 0.48
+    adiantamento = 0.55
 
     srt_path = audio_path.with_suffix(".srt")
 
@@ -261,7 +283,7 @@ def montar_video(noticia: dict, audio_path: Path) -> Path:
     duracao = mutagen.mp3.MP3(str(audio_path)).info.length
 
     # query melhor para o Pexels
-    query = noticia.get("titulo", "")
+    query = gerar_query_imagem(noticia)
     print(f"[VIDEO] Query final de imagens: {query}")
 
     frames_brutos = buscar_imagens(query, quantidade=5)
