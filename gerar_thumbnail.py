@@ -7,10 +7,21 @@ OUTPUT_DIR = Path("videos_gerados")
 W, H = 1280, 720
 
 def carregar_fonte(tamanho: int):
-    try:
-        return ImageFont.truetype(str(ASSETS_DIR / "fonte.ttf"), tamanho)
-    except Exception:
-        return ImageFont.load_default()
+    fontes_teste = [
+        ASSETS_DIR / "fonte.ttf",
+        Path("C:/Windows/Fonts/arialbd.ttf"),
+        Path("C:/Windows/Fonts/Arialbd.ttf"),
+        Path("C:/Windows/Fonts/arial.ttf"),
+    ]
+
+    for caminho in fontes_teste:
+        try:
+            if caminho.exists():
+                return ImageFont.truetype(str(caminho), tamanho)
+        except Exception:
+            pass
+
+    return ImageFont.load_default()
 
 def escolher_imagem_base():
     candidatas = list(OUTPUT_DIR.glob("img_*.jpg"))
@@ -28,41 +39,59 @@ def escolher_imagem_base():
 
     return fallback[0]
 
+def gerar_thumbnail(texto: str, output_path: str = "videos_gerados/thumb.jpg"):
+    base_path = escolher_imagem_base()
 
-def gerar_thumbnail(headline: str, output_path: str = "videos_gerados/thumb.jpg"):
-    img_path = escolher_imagem_base()
-    img = Image.open(img_path).convert("RGB").resize((W, H), Image.LANCZOS)
-    img = img.filter(ImageFilter.GaussianBlur(radius=1.5))
+    img = Image.open(base_path).convert("RGB")
+    img = img.resize((W, H))
 
-    overlay = Image.new("RGBA", (W, H), (0, 0, 0, 90))
-    img = Image.alpha_composite(img.convert("RGBA"), overlay)
+    # leve blur no fundo para destacar o texto
+    fundo = img.filter(ImageFilter.GaussianBlur(2))
 
-    draw = ImageDraw.Draw(img)
+    draw = ImageDraw.Draw(fundo)
 
-    # barra vermelha
-    draw.rectangle([0, 0, W, 110], fill=(180, 20, 20, 230))
-    fonte_topo = carregar_fonte(40)
-    draw.text((40, 28), "URGENTE", font=fonte_topo, fill=(255, 255, 255))
+    # faixa vermelha superior
+    draw.rectangle((0, 0, W, 110), fill=(191, 12, 19))
+    fonte_topo = carregar_fonte(28)
+    draw.text((40, 35), "URGENTE", font=fonte_topo, fill="white")
 
-    # caixa de destaque
-    box_x1, box_y1, box_x2, box_y2 = 70, 180, 1210, 610
-    draw.rounded_rectangle([box_x1, box_y1, box_x2, box_y2], radius=28, fill=(0, 0, 0, 170))
+    # caixa preta inferior/central
+    caixa_x1, caixa_y1 = 70, 360
+    caixa_x2, caixa_y2 = W - 70, H - 50
+    draw.rounded_rectangle(
+        (caixa_x1, caixa_y1, caixa_x2, caixa_y2),
+        radius=28,
+        fill=(0, 0, 0)
+    )
 
-    fonte_texto = carregar_fonte(78)
-    linhas = textwrap.wrap(headline.upper(), width=18)
+    # texto principal
+    texto = texto.upper().strip()
+    linhas = textwrap.wrap(texto, width=18)
 
-    y = 235
-    for linha in linhas[:4]:
-        bbox = draw.textbbox((0, 0), linha, font=fonte_texto)
+    fonte_titulo = carregar_fonte(72)
+    espaco_entre_linhas = 18
+
+    alturas = []
+    for linha in linhas:
+        bbox = draw.textbbox((0, 0), linha, font=fonte_titulo)
+        alturas.append(bbox[3] - bbox[1])
+
+    altura_total = sum(alturas) + espaco_entre_linhas * (len(linhas) - 1)
+    y = caixa_y1 + ((caixa_y2 - caixa_y1) - altura_total) // 2
+
+    for i, linha in enumerate(linhas):
+        bbox = draw.textbbox((0, 0), linha, font=fonte_titulo)
         largura = bbox[2] - bbox[0]
+        altura = bbox[3] - bbox[1]
         x = (W - largura) // 2
-        draw.text((x, y), linha, font=fonte_texto, fill=(255, 255, 255), stroke_width=4, stroke_fill=(0, 0, 0))
-        y += 92
 
-    img.convert("RGB").save(output_path, quality=95)
+        # contorno
+        for dx, dy in [(-3, 0), (3, 0), (0, -3), (0, 3), (-2, -2), (2, 2), (-2, 2), (2, -2)]:
+            draw.text((x + dx, y + dy), linha, font=fonte_titulo, fill="black")
+
+        draw.text((x, y), linha, font=fonte_titulo, fill="white")
+        y += altura + espaco_entre_linhas
+
+    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+    fundo.save(output_path, quality=95)
     print(f"[OK] Thumbnail gerada: {output_path}")
-
-
-if __name__ == "__main__":
-    gerar_thumbnail("Lula desafia líderes globais")
-    
