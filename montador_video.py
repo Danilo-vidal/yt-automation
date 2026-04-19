@@ -63,16 +63,11 @@ def gerar_srt_simples(texto: str, audio_path: Path) -> Path:
     import re
 
     duracao = mutagen.mp3.MP3(str(audio_path)).info.length
-
-    # limpa espaços
     texto = re.sub(r"\s+", " ", texto).strip()
-
-    # quebra em palavras
     palavras = texto.split()
 
-    # grupos curtos estilo reels
     grupos = []
-    tamanho_grupo = 2  # pode testar 2, 3 ou 4
+    tamanho_grupo = 4
 
     for i in range(0, len(palavras), tamanho_grupo):
         grupo = " ".join(palavras[i:i + tamanho_grupo])
