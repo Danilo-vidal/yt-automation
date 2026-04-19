@@ -185,6 +185,52 @@ def buscar_imagens_pexels(query: str, quantidade: int = 5, prefixo: str = "pexel
 
     return caminhos
 
+def gerar_frames_dinamicos_de_uma_imagem(base_path: Path, quantidade: int = 5) -> List[Path]:
+    """
+    Cria vários frames visuais a partir de uma única imagem base,
+    com crops e tratamentos diferentes para forçar mudança no vídeo.
+    """
+    if not base_path.exists():
+        return []
+
+    print(f"[IMAGENS] Gerando {quantidade} frames dinâmicos a partir de: {base_path}")
+
+    base = Image.open(base_path).convert("RGB")
+    w, h = base.size
+
+    variacoes = []
+    recortes = [
+        (0.00, 0.00, 1.00, 1.00),  # original
+        (0.05, 0.02, 0.95, 0.98),  # crop central
+        (0.00, 0.00, 0.90, 0.95),  # esquerda
+        (0.10, 0.03, 1.00, 0.98),  # direita
+        (0.03, 0.05, 0.97, 0.90),  # topo/centro
+    ]
+
+    for i in range(min(quantidade, len(recortes))):
+        x1p, y1p, x2p, y2p = recortes[i]
+
+        x1 = int(w * x1p)
+        y1 = int(h * y1p)
+        x2 = int(w * x2p)
+        y2 = int(h * y2p)
+
+        img = base.crop((x1, y1, x2, y2)).resize((w, h), Image.LANCZOS)
+
+        if i == 1:
+            img = ImageEnhance.Contrast(img).enhance(1.08)
+        elif i == 2:
+            img = ImageEnhance.Brightness(img).enhance(0.95)
+        elif i == 3:
+            img = ImageEnhance.Sharpness(img).enhance(1.12)
+        elif i == 4:
+            img = ImageEnhance.Color(img).enhance(0.92)
+
+        out = OUTPUT_DIR / f"img_force_{i}.jpg"
+        img.save(out, quality=95)
+        variacoes.append(out)
+
+    return variacoes
 
 def buscar_imagens_pexels_multiplas(noticia: dict, quantidade_total: int = 4) -> List[Path]:
     queries = gerar_queries_alternativas(noticia)
@@ -282,7 +328,7 @@ def obter_frames_visuais(noticia: dict, quantidade_total: int = 5) -> List[Path]
     except Exception as e:
         print(f"[IMG IA] Falha ao gerar imagem IA: {e}")
 
-    # tenta completar com Pexels usando várias queries
+    # tenta completar com Pexels
     faltam = max(0, quantidade_total - len(frames))
     if faltam > 0:
         pexels = buscar_imagens_pexels_multiplas(noticia, quantidade_total=faltam)
@@ -294,7 +340,7 @@ def obter_frames_visuais(noticia: dict, quantidade_total: int = 5) -> List[Path]
         locais = buscar_imagens_locais(quantidade=faltam)
         frames.extend(locais)
 
-    # remove duplicados por caminho
+    # remove duplicados
     unicos: List[Path] = []
     vistos = set()
     for p in frames:
@@ -305,14 +351,11 @@ def obter_frames_visuais(noticia: dict, quantidade_total: int = 5) -> List[Path]
 
     frames = unicos
 
-    # se ainda vier menos que 3 imagens, cria variações forçadas
-    if len(frames) < 3 and frames:
-        faltam = quantidade_total - len(frames)
-        variacoes = gerar_variacoes_de_imagem(frames[0], quantidade=max(0, faltam))
-        frames.extend(variacoes)
-
-    # corte final no máximo desejado
-    frames = frames[:quantidade_total]
+    # se no final vier menos que 5, força 5 frames a partir da primeira imagem
+    if frames:
+        if len(frames) < quantidade_total:
+            print("[IMAGENS] Poucas imagens encontradas. Forçando frames dinâmicos.")
+            frames = gerar_frames_dinamicos_de_uma_imagem(frames[0], quantidade=quantidade_total)
 
     print(f"[IMAGENS] Total final de frames visuais: {len(frames)}")
     for i, frame in enumerate(frames, 1):
@@ -360,7 +403,7 @@ def gerar_srt_simples(texto: str, audio_path: Path) -> Path:
         grupos = [texto]
 
     dur_por_grupo = max((duracao / len(grupos)) * 0.90, 0.55)
-    adiantamento = 0.42
+    adiantamento = 0.40
 
     srt_path = audio_path.with_suffix(".srt")
 
