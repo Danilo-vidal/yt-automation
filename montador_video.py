@@ -92,7 +92,7 @@ def gerar_srt_simples(texto: str, audio_path: Path) -> Path:
 
     # legenda ligeiramente mais “adiantada” para acompanhar melhor o TTS
     dur_por_grupo = max((duracao / len(grupos)) * 0.92, 0.7)
-    adiantamento = 0.18
+    adiantamento = 0.28
 
     srt_path = audio_path.with_suffix(".srt")
 
