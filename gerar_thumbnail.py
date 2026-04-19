@@ -5,14 +5,16 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 from openai import OpenAI
 
-OUTPUT = Path("thumb.jpg")
+OUTPUT_DIR = Path("videos_gerados")
+OUTPUT_DIR.mkdir(exist_ok=True)
+
+OUTPUT = OUTPUT_DIR / "thumb.jpg"
+BASE_IMG = OUTPUT_DIR / "thumb_base.png"
+
 WIDTH, HEIGHT = 1280, 720
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# =========================
-# GERAR IMAGEM COM IA
-# =========================
 def gerar_imagem_base(prompt):
     print("[THUMB] Gerando imagem com IA...")
 
@@ -25,24 +27,15 @@ def gerar_imagem_base(prompt):
     b64 = img.data[0].b64_json
     img_bytes = base64.b64decode(b64)
 
-    path = "thumb_base.png"
-    with open(path, "wb") as f:
+    with open(BASE_IMG, "wb") as f:
         f.write(img_bytes)
 
-    return path
+    return BASE_IMG
 
-
-# =========================
-# QUEBRAR TEXTO EM LINHAS
-# =========================
 def quebrar_texto(texto, largura=18, max_linhas=3):
     linhas = textwrap.wrap(texto.upper(), width=largura)
     return linhas[:max_linhas]
 
-
-# =========================
-# DESENHAR TEXTO CENTRAL
-# =========================
 def desenhar_texto(img, texto):
     draw = ImageDraw.Draw(img)
 
@@ -52,28 +45,22 @@ def desenhar_texto(img, texto):
         fonte = ImageFont.load_default()
 
     linhas = quebrar_texto(texto)
-
     y = HEIGHT // 2 - (len(linhas) * 60)
 
     for linha in linhas:
-        w, h = draw.textbbox((0, 0), linha, font=fonte)[2:]
+        bbox = draw.textbbox((0, 0), linha, font=fonte)
+        w = bbox[2] - bbox[0]
+        h = bbox[3] - bbox[1]
 
         x = (WIDTH - w) // 2
 
-        # contorno preto
         for dx in [-3, -2, -1, 1, 2, 3]:
             for dy in [-3, -2, -1, 1, 2, 3]:
                 draw.text((x + dx, y + dy), linha, font=fonte, fill="black")
 
-        # texto branco
         draw.text((x, y), linha, font=fonte, fill="white")
-
         y += h + 10
 
-
-# =========================
-# FUNÇÃO PRINCIPAL
-# =========================
 def gerar_thumbnail(headline):
     prompt = f"{headline}, dramatic, protest, political tension, cinematic lighting, realistic, news photo"
 
@@ -84,7 +71,6 @@ def gerar_thumbnail(headline):
 
     draw = ImageDraw.Draw(img)
 
-    # faixa vermelha topo
     draw.rectangle([0, 0, WIDTH, 120], fill=(200, 0, 0))
 
     try:
@@ -94,12 +80,10 @@ def gerar_thumbnail(headline):
 
     draw.text((30, 30), "URGENTE", font=fonte_topo, fill="white")
 
-    # texto principal
     desenhar_texto(img, headline)
 
-    img.save(OUTPUT)
-    print("[THUMB] Thumbnail gerada com sucesso")
-
+    img.save(OUTPUT, quality=95)
+    print(f"[THUMB] Thumbnail gerada com sucesso em: {OUTPUT}")
 
 if __name__ == "__main__":
     gerar_thumbnail("Crise política explode no Brasil")

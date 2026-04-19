@@ -4,10 +4,10 @@ on:
   workflow_dispatch:
 
   schedule:
-    - cron: '0 12 * * *'
-      timezone: 'America/Sao_Paulo'
-    - cron: '0 19 * * *'
-      timezone: 'America/Sao_Paulo'
+  - cron: '0 12 * * *'
+    timezone: 'America/Sao_Paulo'
+  - cron: '0 19 * * *'
+    timezone: 'America/Sao_Paulo'
 
 jobs:
   gerar-video:

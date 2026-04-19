@@ -11,6 +11,7 @@ load_dotenv()
 
 AUDIO_PATH = Path("audio.mp3")
 ROTEIRO_JSON = Path("roteiro_gerado.json")
+THUMB_PATH = Path("videos_gerados/thumb.jpg")
 
 def executar_pipeline():
     print("\n[PIPELINE] Iniciando execução...\n")
@@ -50,12 +51,16 @@ def executar_pipeline():
     }
 
     video_path = montar_video(noticia_para_video, AUDIO_PATH)
-    
+
     print("[THUMB] Gerando thumbnail...")
     gerar_thumbnail(resultado["headline_capa"])
 
+    if not THUMB_PATH.exists():
+        raise RuntimeError(f"Thumbnail não foi criada em {THUMB_PATH}")
+
     print("\n[SUCESSO]")
     print(f"Vídeo gerado com sucesso em: {video_path}")
+    print(f"Thumbnail gerada com sucesso em: {THUMB_PATH}")
 
 if __name__ == "__main__":
     executar_pipeline()
