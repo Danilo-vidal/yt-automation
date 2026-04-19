@@ -81,7 +81,7 @@ def gerar_srt_simples(texto: str, audio_path: Path) -> Path:
     palavras = texto.split()
 
     grupos = []
-    tamanho_grupo = 4
+    tamanho_grupo = 3
 
     for i in range(0, len(palavras), tamanho_grupo):
         grupo = " ".join(palavras[i:i + tamanho_grupo])
@@ -92,7 +92,7 @@ def gerar_srt_simples(texto: str, audio_path: Path) -> Path:
 
     # legenda ligeiramente mais “adiantada” para acompanhar melhor o TTS
     dur_por_grupo = max((duracao / len(grupos)) * 0.92, 0.7)
-    adiantamento = 0.32
+    adiantamento = 0.48
 
     srt_path = audio_path.with_suffix(".srt")
 
@@ -177,7 +177,7 @@ def montar_slideshow(frames: List[Path], audio_path: Path, srt_path: Path, durac
 
     srt_escaped = str(srt_path.resolve()).replace("\\", "/").replace(":", "\\:")
     filtros.append(
-    f"[vout]subtitles='{srt_escaped}':force_style='FontName=Arial,FontSize=18,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BackColour=&H00000000,Outline=3,Shadow=0,Alignment=2,MarginV=38,Bold=1'[vfinal]"
+    f"[vout]subtitles='{srt_escaped}':force_style='FontName=Arial,FontSize=16,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BackColour=&H00000000,Outline=3,Shadow=0,Alignment=2,MarginV=38,Bold=1'[vfinal]"
 )
 
     filter_complex = ";".join(filtros)
