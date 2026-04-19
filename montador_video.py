@@ -7,7 +7,7 @@ from typing import List
 
 import requests
 from bs4 import BeautifulSoup
-from PIL import Image, ImageDraw, ImageFont, ImageEnhance, ImageFilter
+from PIL import Image, ImageDraw, ImageFont, ImageEnhance
 import mutagen.mp3
 from openai import OpenAI
 
@@ -185,52 +185,6 @@ def buscar_imagens_pexels(query: str, quantidade: int = 5, prefixo: str = "pexel
 
     return caminhos
 
-def gerar_frames_dinamicos_de_uma_imagem(base_path: Path, quantidade: int = 5) -> List[Path]:
-    """
-    Cria vários frames visuais a partir de uma única imagem base,
-    com crops e tratamentos diferentes para forçar mudança no vídeo.
-    """
-    if not base_path.exists():
-        return []
-
-    print(f"[IMAGENS] Gerando {quantidade} frames dinâmicos a partir de: {base_path}")
-
-    base = Image.open(base_path).convert("RGB")
-    w, h = base.size
-
-    variacoes = []
-    recortes = [
-        (0.00, 0.00, 1.00, 1.00),  # original
-        (0.05, 0.02, 0.95, 0.98),  # crop central
-        (0.00, 0.00, 0.90, 0.95),  # esquerda
-        (0.10, 0.03, 1.00, 0.98),  # direita
-        (0.03, 0.05, 0.97, 0.90),  # topo/centro
-    ]
-
-    for i in range(min(quantidade, len(recortes))):
-        x1p, y1p, x2p, y2p = recortes[i]
-
-        x1 = int(w * x1p)
-        y1 = int(h * y1p)
-        x2 = int(w * x2p)
-        y2 = int(h * y2p)
-
-        img = base.crop((x1, y1, x2, y2)).resize((w, h), Image.LANCZOS)
-
-        if i == 1:
-            img = ImageEnhance.Contrast(img).enhance(1.08)
-        elif i == 2:
-            img = ImageEnhance.Brightness(img).enhance(0.95)
-        elif i == 3:
-            img = ImageEnhance.Sharpness(img).enhance(1.12)
-        elif i == 4:
-            img = ImageEnhance.Color(img).enhance(0.92)
-
-        out = OUTPUT_DIR / f"img_force_{i}.jpg"
-        img.save(out, quality=95)
-        variacoes.append(out)
-
-    return variacoes
 
 def buscar_imagens_pexels_multiplas(noticia: dict, quantidade_total: int = 4) -> List[Path]:
     queries = gerar_queries_alternativas(noticia)
@@ -269,45 +223,46 @@ def buscar_imagens_locais(quantidade: int = 5) -> List[Path]:
     return locais[:quantidade]
 
 
-def gerar_variacoes_de_imagem(base_path: Path, quantidade: int = 4) -> List[Path]:
-    """
-    Gera variações visuais da mesma imagem para impedir vídeo estático
-    quando não houver imagens suficientes vindas da internet.
-    """
+def gerar_frames_dinamicos_de_uma_imagem(base_path: Path, quantidade: int = 5) -> List[Path]:
     if not base_path.exists():
         return []
 
-    print(f"[IMAGENS] Gerando {quantidade} variações a partir de: {base_path}")
+    print(f"[IMAGENS] Gerando {quantidade} frames dinâmicos a partir de: {base_path}")
 
     base = Image.open(base_path).convert("RGB")
-    variacoes: List[Path] = []
+    w, h = base.size
 
-    for i in range(quantidade):
-        img = base.copy()
+    variacoes = []
+    recortes = [
+        (0.00, 0.00, 1.00, 1.00),
+        (0.05, 0.02, 0.95, 0.98),
+        (0.00, 0.00, 0.90, 0.95),
+        (0.10, 0.03, 1.00, 0.98),
+        (0.03, 0.05, 0.97, 0.90),
+    ]
 
-        if i == 0:
-            # original levemente realçada
+    for i in range(min(quantidade, len(recortes))):
+        x1p, y1p, x2p, y2p = recortes[i]
+
+        x1 = int(w * x1p)
+        y1 = int(h * y1p)
+        x2 = int(w * x2p)
+        y2 = int(h * y2p)
+
+        img = base.crop((x1, y1, x2, y2)).resize((w, h), Image.LANCZOS)
+
+        if i == 1:
             img = ImageEnhance.Contrast(img).enhance(1.08)
-        elif i == 1:
-            # crop mais fechado
-            w, h = img.size
-            img = img.crop((int(w * 0.05), int(h * 0.03), int(w * 0.95), int(h * 0.97)))
-            img = img.resize((w, h), Image.LANCZOS)
         elif i == 2:
-            # brilho levemente menor
-            img = ImageEnhance.Brightness(img).enhance(0.92)
+            img = ImageEnhance.Brightness(img).enhance(0.95)
         elif i == 3:
-            # nitidez + crop diferente
-            w, h = img.size
-            img = img.crop((0, int(h * 0.02), int(w * 0.92), int(h * 0.98)))
-            img = img.resize((w, h), Image.LANCZOS)
-            img = ImageEnhance.Sharpness(img).enhance(1.15)
-        else:
-            img = img.filter(ImageFilter.GaussianBlur(radius=0.3))
+            img = ImageEnhance.Sharpness(img).enhance(1.12)
+        elif i == 4:
+            img = ImageEnhance.Color(img).enhance(0.92)
 
-        path = OUTPUT_DIR / f"img_var_{i}.jpg"
-        img.save(path, quality=95)
-        variacoes.append(path)
+        out = OUTPUT_DIR / f"img_force_{i}.jpg"
+        img.save(out, quality=95)
+        variacoes.append(out)
 
     return variacoes
 
@@ -318,7 +273,6 @@ def obter_frames_visuais(noticia: dict, quantidade_total: int = 5) -> List[Path]
     url = noticia.get("url", "") or noticia.get("link", "")
     contexto_extra = extrair_contexto_da_materia(url) if url else ""
 
-    # 1 imagem IA principal
     img_ia_path = OUTPUT_DIR / "img_ia_0.jpg"
     prompt_visual = gerar_prompt_visual(noticia, contexto_extra)
 
@@ -328,19 +282,16 @@ def obter_frames_visuais(noticia: dict, quantidade_total: int = 5) -> List[Path]
     except Exception as e:
         print(f"[IMG IA] Falha ao gerar imagem IA: {e}")
 
-    # tenta completar com Pexels
     faltam = max(0, quantidade_total - len(frames))
     if faltam > 0:
         pexels = buscar_imagens_pexels_multiplas(noticia, quantidade_total=faltam)
         frames.extend(pexels)
 
-    # fallback local
     if len(frames) < quantidade_total:
         faltam = quantidade_total - len(frames)
         locais = buscar_imagens_locais(quantidade=faltam)
         frames.extend(locais)
 
-    # remove duplicados
     unicos: List[Path] = []
     vistos = set()
     for p in frames:
@@ -351,17 +302,15 @@ def obter_frames_visuais(noticia: dict, quantidade_total: int = 5) -> List[Path]
 
     frames = unicos
 
-    # se no final vier menos que 5, força 5 frames a partir da primeira imagem
-    if frames:
-        if len(frames) < quantidade_total:
-            print("[IMAGENS] Poucas imagens encontradas. Forçando frames dinâmicos.")
-            frames = gerar_frames_dinamicos_de_uma_imagem(frames[0], quantidade=quantidade_total)
+    if frames and len(frames) < quantidade_total:
+        print("[IMAGENS] Poucas imagens encontradas. Forçando frames dinâmicos.")
+        frames = gerar_frames_dinamicos_de_uma_imagem(frames[0], quantidade=quantidade_total)
 
     print(f"[IMAGENS] Total final de frames visuais: {len(frames)}")
     for i, frame in enumerate(frames, 1):
         print(f"[IMAGENS] Frame {i}: {frame}")
 
-    return frames
+    return frames[:quantidade_total]
 
 
 def formatar_tempo_srt(segundos: float) -> str:
@@ -403,7 +352,7 @@ def gerar_srt_simples(texto: str, audio_path: Path) -> Path:
         grupos = [texto]
 
     dur_por_grupo = max((duracao / len(grupos)) * 0.90, 0.55)
-    adiantamento = 0.40
+    adiantamento = 0.36
 
     srt_path = audio_path.with_suffix(".srt")
 
@@ -468,58 +417,90 @@ def compor_frame(img_path: Path, titulo: str, indice: int) -> Path:
     return frame_path
 
 
+def criar_clipe_por_frame(frame: Path, indice: int, duracao: float) -> Path:
+    clip_path = OUTPUT_DIR / f"clip_{indice:03d}.mp4"
+
+    if indice % 2 == 0:
+        vf = (
+            f"scale=2200:-1,"
+            f"zoompan=z='min(zoom+0.0008,1.08)':"
+            f"x='iw/2-(iw/zoom/2)':"
+            f"y='ih/2-(ih/zoom/2)':"
+            f"d={int(duracao * 25)}:s={W}x{H}:fps=25,"
+            f"setsar=1"
+        )
+    else:
+        vf = (
+            f"scale=2200:-1,"
+            f"zoompan=z='if(lte(zoom,1.0),1.08,max(zoom-0.0008,1.0))':"
+            f"x='iw/2-(iw/zoom/2)':"
+            f"y='ih/2-(ih/zoom/2)':"
+            f"d={int(duracao * 25)}:s={W}x{H}:fps=25,"
+            f"setsar=1"
+        )
+
+    cmd = [
+        "ffmpeg", "-y",
+        "-loop", "1",
+        "-i", str(frame),
+        "-t", str(duracao),
+        "-vf", vf,
+        "-r", "25",
+        "-c:v", "libx264",
+        "-preset", "fast",
+        "-crf", "22",
+        "-pix_fmt", "yuv420p",
+        str(clip_path),
+    ]
+
+    print(f"[FFMPEG] Criando clipe do frame {indice}: {frame.name}")
+    subprocess.run(cmd, check=True)
+    return clip_path
+
+
 def montar_slideshow(frames: List[Path], audio_path: Path, srt_path: Path, duracao_audio: float) -> Path:
     if not frames:
         raise RuntimeError("Nenhum frame disponível para montar o slideshow.")
 
-    corpo_path = OUTPUT_DIR / "corpo.mp4"
     duracao_por_frame = duracao_audio / len(frames)
-
-    inputs = []
-    filtros = []
+    clips = []
 
     for i, frame in enumerate(frames):
-        inputs += ["-loop", "1", "-t", str(duracao_por_frame), "-i", str(frame)]
+        clip = criar_clipe_por_frame(frame, i, duracao_por_frame)
+        clips.append(clip)
 
-        if i % 2 == 0:
-            filtros.append(
-                f"[{i}:v]scale=2200:-1,"
-                f"zoompan=z='min(zoom+0.0008,1.08)':"
-                f"x='iw/2-(iw/zoom/2)':"
-                f"y='ih/2-(ih/zoom/2)':"
-                f"d={int(duracao_por_frame * 25)}:s={W}x{H}:fps=25,"
-                f"setsar=1[v{i}]"
-            )
-        else:
-            filtros.append(
-                f"[{i}:v]scale=2200:-1,"
-                f"zoompan=z='if(lte(zoom,1.0),1.08,max(zoom-0.0008,1.0))':"
-                f"x='iw/2-(iw/zoom/2)':"
-                f"y='ih/2-(ih/zoom/2)':"
-                f"d={int(duracao_por_frame * 25)}:s={W}x{H}:fps=25,"
-                f"setsar=1[v{i}]"
-            )
+    lista_clips = OUTPUT_DIR / "lista_clips.txt"
+    with open(lista_clips, "w", encoding="utf-8") as f:
+        for clip in clips:
+            f.write(f"file '{clip.resolve()}'\n")
 
-    concat_inputs = "".join(f"[v{i}]" for i in range(len(frames)))
-    filtros.append(f"{concat_inputs}concat=n={len(frames)}:v=1:a=0[vout]")
-
-    srt_escaped = str(srt_path.resolve()).replace("\\", "/").replace(":", "\\:")
-    filtros.append(
-        f"[vout]drawbox=x=0:y={H-220}:w={W}:h=220:color=black@0.88:t=fill[bg]"
-    )
-    filtros.append(
-        f"[bg]subtitles='{srt_escaped}':force_style='FontName=Arial,FontSize=18,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BackColour=&H00000000,Outline=2,Shadow=0,Alignment=2,MarginV=65,Bold=1'[vfinal]"
-    )
-
-    filter_complex = ";".join(filtros)
-
-    cmd = [
+    slideshow_base = OUTPUT_DIR / "slideshow_base.mp4"
+    cmd_concat = [
         "ffmpeg", "-y",
-        *inputs,
+        "-f", "concat",
+        "-safe", "0",
+        "-i", str(lista_clips),
+        "-c", "copy",
+        str(slideshow_base),
+    ]
+    print("[FFMPEG] Concatenando clips do slideshow...")
+    subprocess.run(cmd_concat, check=True)
+
+    corpo_path = OUTPUT_DIR / "corpo.mp4"
+    srt_escaped = str(srt_path.resolve()).replace("\\", "/").replace(":", "\\:")
+
+    vf_final = (
+        f"drawbox=x=0:y={H-220}:w={W}:h=220:color=black@0.88:t=fill,"
+        f"subtitles='{srt_escaped}':force_style='FontName=Arial,FontSize=18,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BackColour=&H00000000,Outline=2,Shadow=0,Alignment=2,MarginV=65,Bold=1'"
+    )
+
+    cmd_final = [
+        "ffmpeg", "-y",
+        "-i", str(slideshow_base),
         "-i", str(audio_path),
-        "-filter_complex", filter_complex,
-        "-map", "[vfinal]",
-        "-map", f"{len(frames)}:a",
+        "-vf", vf_final,
+        "-map", "0:v",
+        "-map", "1:a",
         "-c:v", "libx264",
         "-preset", "fast",
         "-crf", "22",
@@ -530,9 +511,8 @@ def montar_slideshow(frames: List[Path], audio_path: Path, srt_path: Path, durac
         str(corpo_path),
     ]
 
-    print("[FFMPEG] Montando slideshow...")
     print(f"[FFMPEG] Quantidade de entradas de imagem: {len(frames)}")
-    subprocess.run(cmd, check=True)
+    subprocess.run(cmd_final, check=True)
     return corpo_path
 
 

@@ -100,11 +100,9 @@ def gerar_thumbnail(headline: str):
     img = Image.open(base_img_path).convert("RGB")
     img = img.resize((WIDTH, HEIGHT), Image.LANCZOS)
 
-    # contraste e nitidez leves
     img = ImageEnhance.Contrast(img).enhance(1.10)
     img = ImageEnhance.Sharpness(img).enhance(1.08)
 
-    # sombreado suave na parte inferior para leitura do texto
     overlay = Image.new("RGBA", (WIDTH, HEIGHT), (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
     draw.rectangle([0, HEIGHT - 230, WIDTH, HEIGHT], fill=(0, 0, 0, 110))
