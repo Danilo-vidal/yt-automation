@@ -160,7 +160,6 @@ def montar_slideshow(frames: List[Path], audio_path: Path, srt_path: Path, durac
     srt_escaped = str(srt_path.resolve()).replace("\\", "/").replace(":", "\\:")
     filtros.append(
     f"[vout]subtitles='{srt_escaped}':force_style='FontName=Arial,FontSize=12,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BackColour=&H00000000,Outline=2,Shadow=0,Alignment=2,MarginV=260,Spacing=0,Bold=1'[vfinal]"
-    f"force_style='FontName=Arial,FontSize=14,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BackColour=&H00000000,Outline=2,Shadow=0,Alignment=2,MarginV=140,Spacing=0,Bold=1'[vfinal]"
   )
 
     filter_complex = ";".join(filtros)
