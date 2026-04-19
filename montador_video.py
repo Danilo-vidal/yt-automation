@@ -166,11 +166,11 @@ def buscar_imagens_locais(quantidade: int = 5):
         + list(ASSETS_DIR.glob("*.png"))
         + list(ASSETS_DIR.glob("*.jpeg"))
     )
-    print(f"[IMAGENS] Usando assets locais: {len(locais)}")
+    print(f"[IMAGENS] Assets locais encontrados: {len(locais)}")
     return locais[:quantidade]
 
 
-def obter_frames_visuais(noticia: dict, quantidade_pexels: int = 4):
+def obter_frames_visuais(noticia: dict, quantidade_total: int = 5):
     frames = []
 
     url = noticia.get("url", "") or noticia.get("link", "")
@@ -179,29 +179,39 @@ def obter_frames_visuais(noticia: dict, quantidade_pexels: int = 4):
     prompt_visual = gerar_prompt_visual(noticia, contexto_extra)
     img_ia_path = OUTPUT_DIR / "img_ia_0.jpg"
 
+    # 1 imagem principal por IA
     try:
         gerar_imagem_ia_para_video(prompt_visual, img_ia_path)
         frames.append(img_ia_path)
     except Exception as e:
         print(f"[IMG IA] Falha ao gerar imagem IA: {e}")
 
-    query = gerar_query_imagem(noticia)
-    imagens_pexels = buscar_imagens(query, quantidade=quantidade_pexels)
-    frames.extend(imagens_pexels)
+    # tenta completar com Pexels
+    faltam = max(0, quantidade_total - len(frames))
+    if faltam > 0:
+        query = gerar_query_imagem(noticia)
+        imagens_pexels = buscar_imagens(query, quantidade=faltam)
+        frames.extend(imagens_pexels)
 
-    if not frames:
-        frames.extend(buscar_imagens_locais(quantidade=5))
+    # fallback local se ainda faltarem imagens
+    if len(frames) < quantidade_total:
+        faltam = quantidade_total - len(frames)
+        locais = buscar_imagens_locais(quantidade=faltam)
+        frames.extend(locais)
 
     # remove duplicados preservando ordem
     unicos = []
     vistos = set()
     for p in frames:
-        p_str = str(p)
+        p_str = str(Path(p).resolve())
         if p_str not in vistos:
             vistos.add(p_str)
             unicos.append(Path(p))
 
     print(f"[IMAGENS] Total final de frames visuais: {len(unicos)}")
+    for i, frame in enumerate(unicos, 1):
+        print(f"[IMAGENS] Frame {i}: {frame}")
+
     return unicos
 
 
@@ -245,7 +255,7 @@ def gerar_srt_simples(texto: str, audio_path: Path) -> Path:
         grupos = [texto]
 
     dur_por_grupo = max((duracao / len(grupos)) * 0.90, 0.55)
-    adiantamento = 0.48
+    adiantamento = 0.45
 
     srt_path = audio_path.with_suffix(".srt")
 
@@ -439,7 +449,7 @@ def concatenar_video(corpo_path: Path) -> Path:
 def montar_video(noticia: dict, audio_path: Path) -> Path:
     duracao = mutagen.mp3.MP3(str(audio_path)).info.length
 
-    frames_brutos = obter_frames_visuais(noticia, quantidade_pexels=4)
+    frames_brutos = obter_frames_visuais(noticia, quantidade_total=5)
     if not frames_brutos:
         raise RuntimeError("Nenhuma imagem encontrada para montar o vídeo.")
 
