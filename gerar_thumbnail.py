@@ -1,141 +1,105 @@
-from pathlib import Path
-from PIL import Image, ImageDraw, ImageFont, ImageFilter
+import os
+import base64
 import textwrap
+from pathlib import Path
+from PIL import Image, ImageDraw, ImageFont
+from openai import OpenAI
 
-ASSETS_DIR = Path("assets")
-OUTPUT_DIR = Path("videos_gerados")
-W, H = 1280, 720
+OUTPUT = Path("thumb.jpg")
+WIDTH, HEIGHT = 1280, 720
 
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-def carregar_fonte(tamanho: int):
-    fontes_teste = [
-        ASSETS_DIR / "fonte.ttf",
-        Path("C:/Windows/Fonts/arialbd.ttf"),
-        Path("C:/Windows/Fonts/Arialbd.ttf"),
-        Path("C:/Windows/Fonts/arial.ttf"),
-    ]
+# =========================
+# GERAR IMAGEM COM IA
+# =========================
+def gerar_imagem_base(prompt):
+    print("[THUMB] Gerando imagem com IA...")
 
-    for caminho in fontes_teste:
-        try:
-            if caminho.exists():
-                return ImageFont.truetype(str(caminho), tamanho)
-        except Exception:
-            pass
-
-    return ImageFont.load_default()
-
-
-def escolher_imagem_base():
-    candidatas = list(OUTPUT_DIR.glob("img_*.jpg"))
-    if candidatas:
-        return candidatas[0]
-
-    fallback = (
-        list(ASSETS_DIR.glob("*.jpg")) +
-        list(ASSETS_DIR.glob("*.png")) +
-        list(ASSETS_DIR.glob("*.jpeg"))
+    img = client.images.generate(
+        model="gpt-image-1",
+        prompt=prompt,
+        size="1024x1024"
     )
 
-    if not fallback:
-        raise RuntimeError("Nenhuma imagem disponível para gerar thumbnail.")
+    b64 = img.data[0].b64_json
+    img_bytes = base64.b64decode(b64)
 
-    return fallback[0]
+    path = "thumb_base.png"
+    with open(path, "wb") as f:
+        f.write(img_bytes)
 
-
-def quebrar_texto(texto: str, max_linhas: int = 3, largura: int = 16):
-    texto = texto.upper().strip()
-    linhas = textwrap.wrap(texto, width=largura)
-
-    if len(linhas) > max_linhas:
-        linhas = linhas[:max_linhas]
-        ultima = linhas[-1]
-        if not ultima.endswith("..."):
-            linhas[-1] = ultima[: max(0, len(ultima) - 3)] + "..."
-
-    return linhas
+    return path
 
 
-def desenhar_texto_com_contorno(draw, pos, texto, fonte, fill="white", outline="black", espessura=4):
-    x, y = pos
-    for dx in range(-espessura, espessura + 1):
-        for dy in range(-espessura, espessura + 1):
-            if dx != 0 or dy != 0:
-                draw.text((x + dx, y + dy), texto, font=fonte, fill=outline)
-    draw.text((x, y), texto, font=fonte, fill=fill)
+# =========================
+# QUEBRAR TEXTO EM LINHAS
+# =========================
+def quebrar_texto(texto, largura=18, max_linhas=3):
+    linhas = textwrap.wrap(texto.upper(), width=largura)
+    return linhas[:max_linhas]
 
 
-def gerar_thumbnail(texto: str, output_path: str = "videos_gerados/thumb.jpg"):
-    base_path = escolher_imagem_base()
+# =========================
+# DESENHAR TEXTO CENTRAL
+# =========================
+def desenhar_texto(img, texto):
+    draw = ImageDraw.Draw(img)
 
-    img = Image.open(base_path).convert("RGB")
+    try:
+        fonte = ImageFont.truetype("arialbd.ttf", 90)
+    except:
+        fonte = ImageFont.load_default()
 
-    # preencher 16:9 sem borda
-    img_ratio = img.width / img.height
-    target_ratio = W / H
+    linhas = quebrar_texto(texto)
 
-    if img_ratio > target_ratio:
-        novo_h = H
-        novo_w = int(H * img_ratio)
-    else:
-        novo_w = W
-        novo_h = int(W / img_ratio)
-
-    img = img.resize((novo_w, novo_h), Image.LANCZOS)
-    left = (novo_w - W) // 2
-    top = (novo_h - H) // 2
-    img = img.crop((left, top, left + W, top + H))
-
-    # leve contraste visual
-    fundo = img.filter(ImageFilter.GaussianBlur(1))
-    overlay = Image.new("RGBA", (W, H), (0, 0, 0, 35))
-    fundo = Image.alpha_composite(fundo.convert("RGBA"), overlay).convert("RGB")
-
-    draw = ImageDraw.Draw(fundo)
-
-    # faixa vermelha superior
-    faixa_h = 95
-    draw.rectangle((0, 0, W, faixa_h), fill=(191, 12, 19))
-
-    fonte_topo = carregar_fonte(30)
-    desenhar_texto_com_contorno(draw, (35, 25), "URGENTE", fonte_topo, fill="white", outline="black", espessura=2)
-
-    # texto principal
-    linhas = quebrar_texto(texto, max_linhas=3, largura=16)
-    fonte_titulo = carregar_fonte(84)
-    espaco = 12
-
-    alturas = []
-    larguras = []
+    y = HEIGHT // 2 - (len(linhas) * 60)
 
     for linha in linhas:
-        bbox = draw.textbbox((0, 0), linha, font=fonte_titulo)
-        larguras.append(bbox[2] - bbox[0])
-        alturas.append(bbox[3] - bbox[1])
+        w, h = draw.textbbox((0, 0), linha, font=fonte)[2:]
 
-    altura_total = sum(alturas) + espaco * (len(linhas) - 1)
+        x = (WIDTH - w) // 2
 
-    # posiciona mais para baixo, estilo thumb de notícia
-    y = int(H * 0.52) - altura_total // 2
+        # contorno preto
+        for dx in [-3, -2, -1, 1, 2, 3]:
+            for dy in [-3, -2, -1, 1, 2, 3]:
+                draw.text((x + dx, y + dy), linha, font=fonte, fill="black")
 
-    for i, linha in enumerate(linhas):
-        largura = larguras[i]
-        altura = alturas[i]
-        x = (W - largura) // 2
-        desenhar_texto_com_contorno(
-            draw,
-            (x, y),
-            linha,
-            fonte_titulo,
-            fill="white",
-            outline="black",
-            espessura=5,
-        )
-        y += altura + espaco
+        # texto branco
+        draw.text((x, y), linha, font=fonte, fill="white")
 
-    # pequena sombra inferior para dar profundidade
-    draw.rectangle((0, H - 90, W, H), fill=(0, 0, 0))
+        y += h + 10
 
-    out = Path(output_path)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    fundo.save(out, quality=95)
-    print(f"[OK] Thumbnail gerada: {out}")
+
+# =========================
+# FUNÇÃO PRINCIPAL
+# =========================
+def gerar_thumbnail(headline):
+    prompt = f"{headline}, dramatic, protest, political tension, cinematic lighting, realistic, news photo"
+
+    base_img_path = gerar_imagem_base(prompt)
+
+    img = Image.open(base_img_path).convert("RGB")
+    img = img.resize((WIDTH, HEIGHT))
+
+    draw = ImageDraw.Draw(img)
+
+    # faixa vermelha topo
+    draw.rectangle([0, 0, WIDTH, 120], fill=(200, 0, 0))
+
+    try:
+        fonte_topo = ImageFont.truetype("arialbd.ttf", 50)
+    except:
+        fonte_topo = ImageFont.load_default()
+
+    draw.text((30, 30), "URGENTE", font=fonte_topo, fill="white")
+
+    # texto principal
+    desenhar_texto(img, headline)
+
+    img.save(OUTPUT)
+    print("[THUMB] Thumbnail gerada com sucesso")
+
+
+if __name__ == "__main__":
+    gerar_thumbnail("Crise política explode no Brasil")

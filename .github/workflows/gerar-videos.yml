@@ -44,6 +44,7 @@ jobs:
         run: |
           pip install -r requirements.txt
           pip install edge-tts
+          pip install openai Pillow
 
       - name: Limpar cache de notícias
         shell: powershell
