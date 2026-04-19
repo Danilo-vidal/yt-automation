@@ -14,26 +14,27 @@ ASSETS_DIR = Path("assets")
 W, H = 1080, 1920
 OUTPUT_DIR.mkdir(exist_ok=True)
 
+
 def gerar_query_imagem(noticia: dict):
     titulo = (noticia.get("titulo") or "").lower()
     resumo = (noticia.get("resumo") or "").lower()
-
     texto = f"{titulo} {resumo}"
 
-    # palavras-chave visuais
-    if any(p in texto for p in ["governo", "lula", "bolsonaro", "presidente", "política"]):
-        return "brazil politics protest congress people"
+    if any(p in texto for p in ["governo", "lula", "bolsonaro", "presidente", "política", "congresso", "senado", "câmara"]):
+        return "brazil politics protest congress government"
 
-    if any(p in texto for p in ["crime", "polícia", "assalto", "prisão"]):
-        return "police arrest crime investigation"
+    if any(p in texto for p in ["crime", "polícia", "assalto", "prisão", "operação", "investigação"]):
+        return "police operation arrest investigation brazil"
 
-    if any(p in texto for p in ["guerra", "ataque", "militar"]):
+    if any(p in texto for p in ["guerra", "ataque", "militar", "míssil", "soldado"]):
         return "war military conflict soldiers"
 
-    if any(p in texto for p in ["economia", "inflação", "dinheiro"]):
-        return "economy money crisis business graph"
+    if any(p in texto for p in ["economia", "inflação", "dinheiro", "mercado", "dólar", "bolsa"]):
+        return "economy money crisis finance business graph"
 
-    # fallback
+    if any(p in texto for p in ["protesto", "manifestação", "rua", "crise"]):
+        return "protest crowd tension street demonstration"
+
     return "breaking news dramatic scene"
 
 
@@ -53,6 +54,7 @@ def buscar_imagens(query: str, quantidade: int = 5):
                 "per_page": quantidade,
                 "orientation": "portrait",
             }
+
             resp = requests.get(url, headers=headers, params=params, timeout=20)
             print(f"[IMAGENS] Status Pexels: {resp.status_code}")
             resp.raise_for_status()
@@ -95,6 +97,25 @@ def formatar_tempo_srt(segundos: float) -> str:
     return f"{h:02}:{m:02}:{s:02},{ms:03}"
 
 
+def agrupar_legendas(palavras, max_palavras=2, max_chars=16):
+    grupos = []
+    atual = []
+
+    for palavra in palavras:
+        teste = " ".join(atual + [palavra])
+
+        if atual and (len(atual) >= max_palavras or len(teste) > max_chars):
+            grupos.append(" ".join(atual))
+            atual = [palavra]
+        else:
+            atual.append(palavra)
+
+    if atual:
+        grupos.append(" ".join(atual))
+
+    return grupos
+
+
 def gerar_srt_simples(texto: str, audio_path: Path) -> Path:
     import re
 
@@ -102,18 +123,12 @@ def gerar_srt_simples(texto: str, audio_path: Path) -> Path:
     texto = re.sub(r"\s+", " ", texto).strip()
     palavras = texto.split()
 
-    grupos = []
-    tamanho_grupo = 3
-
-    for i in range(0, len(palavras), tamanho_grupo):
-        grupo = " ".join(palavras[i:i + tamanho_grupo])
-        grupos.append(grupo)
+    grupos = agrupar_legendas(palavras, max_palavras=2, max_chars=16)
 
     if not grupos:
         grupos = [texto]
 
-    # legenda ligeiramente mais “adiantada” para acompanhar melhor o TTS
-    dur_por_grupo = max((duracao / len(grupos)) * 0.92, 0.7)
+    dur_por_grupo = max((duracao / len(grupos)) * 0.90, 0.55)
     adiantamento = 0.55
 
     srt_path = audio_path.with_suffix(".srt")
@@ -123,13 +138,16 @@ def gerar_srt_simples(texto: str, audio_path: Path) -> Path:
         for i, grupo in enumerate(grupos, 1):
             real_inicio = max(0.0, inicio - adiantamento)
             fim = inicio + dur_por_grupo
+
             f.write(
                 f"{i}\n"
                 f"{formatar_tempo_srt(real_inicio)} --> {formatar_tempo_srt(fim)}\n"
                 f"{grupo}\n\n"
             )
+
             inicio = fim
 
+    print(f"[LEGENDA] SRT gerado em: {srt_path}")
     return srt_path
 
 
@@ -177,6 +195,9 @@ def compor_frame(img_path: Path, titulo: str, indice: int) -> Path:
 
 
 def montar_slideshow(frames: List[Path], audio_path: Path, srt_path: Path, duracao_audio: float) -> Path:
+    if not frames:
+        raise RuntimeError("Nenhum frame disponível para montar o slideshow.")
+
     corpo_path = OUTPUT_DIR / "corpo.mp4"
     duracao_por_frame = duracao_audio / len(frames)
 
@@ -185,22 +206,37 @@ def montar_slideshow(frames: List[Path], audio_path: Path, srt_path: Path, durac
 
     for i, frame in enumerate(frames):
         inputs += ["-loop", "1", "-t", str(duracao_por_frame), "-i", str(frame)]
-        filtros.append(
-            f"[{i}:v]scale=2200:-1,"
-            f"zoompan=z='min(zoom+0.0008,1.08)':"
-            f"x='iw/2-(iw/zoom/2)':"
-            f"y='ih/2-(ih/zoom/2)':"
-            f"d={int(duracao_por_frame * 25)}:s={W}x{H}:fps=25,"
-            f"setsar=1[v{i}]"
-        )
+
+        if i % 2 == 0:
+            filtros.append(
+                f"[{i}:v]scale=2200:-1,"
+                f"zoompan=z='min(zoom+0.0008,1.08)':"
+                f"x='iw/2-(iw/zoom/2)':"
+                f"y='ih/2-(ih/zoom/2)':"
+                f"d={int(duracao_por_frame * 25)}:s={W}x{H}:fps=25,"
+                f"setsar=1[v{i}]"
+            )
+        else:
+            filtros.append(
+                f"[{i}:v]scale=2200:-1,"
+                f"zoompan=z='if(lte(zoom,1.0),1.08,max(zoom-0.0008,1.0))':"
+                f"x='iw/2-(iw/zoom/2)':"
+                f"y='ih/2-(ih/zoom/2)':"
+                f"d={int(duracao_por_frame * 25)}:s={W}x{H}:fps=25,"
+                f"setsar=1[v{i}]"
+            )
 
     concat_inputs = "".join(f"[v{i}]" for i in range(len(frames)))
     filtros.append(f"{concat_inputs}concat=n={len(frames)}:v=1:a=0[vout]")
 
     srt_escaped = str(srt_path.resolve()).replace("\\", "/").replace(":", "\\:")
+
     filtros.append(
-    f"[vout]subtitles='{srt_escaped}':force_style='FontName=Arial,FontSize=16,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BackColour=&H00000000,Outline=3,Shadow=0,Alignment=2,MarginV=38,Bold=1'[vfinal]"
-)
+        f"[vout]drawbox=x=0:y={H-220}:w={W}:h=220:color=black@0.88:t=fill[bg]"
+    )
+    filtros.append(
+        f"[bg]subtitles='{srt_escaped}':force_style='FontName=Arial,FontSize=18,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BackColour=&H00000000,Outline=2,Shadow=0,Alignment=2,MarginV=65,Bold=1'[vfinal]"
+    )
 
     filter_complex = ";".join(filtros)
 
@@ -221,6 +257,7 @@ def montar_slideshow(frames: List[Path], audio_path: Path, srt_path: Path, durac
         str(corpo_path),
     ]
 
+    print("[FFMPEG] Montando slideshow...")
     subprocess.run(cmd, check=True)
     return corpo_path
 
@@ -246,6 +283,8 @@ def adicionar_trilha(corpo_path: Path) -> Path:
         "-shortest",
         str(saida),
     ]
+
+    print("[AUDIO] Adicionando trilha...")
     subprocess.run(cmd, check=True)
     return saida
 
@@ -275,6 +314,8 @@ def concatenar_video(corpo_path: Path) -> Path:
         "-c", "copy",
         str(final_path),
     ]
+
+    print("[VIDEO] Concatenando vídeo final...")
     subprocess.run(cmd, check=True)
     return final_path
 
@@ -282,11 +323,12 @@ def concatenar_video(corpo_path: Path) -> Path:
 def montar_video(noticia: dict, audio_path: Path) -> Path:
     duracao = mutagen.mp3.MP3(str(audio_path)).info.length
 
-    # query melhor para o Pexels
     query = gerar_query_imagem(noticia)
     print(f"[VIDEO] Query final de imagens: {query}")
 
     frames_brutos = buscar_imagens(query, quantidade=5)
+    if not frames_brutos:
+        raise RuntimeError("Nenhuma imagem encontrada para montar o vídeo.")
 
     srt_texto = noticia.get("roteiro_legenda") or noticia.get("resumo") or noticia.get("titulo")
     srt_path = gerar_srt_simples(srt_texto, audio_path)
