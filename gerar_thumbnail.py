@@ -6,24 +6,27 @@ ASSETS_DIR = Path("assets")
 OUTPUT_DIR = Path("videos_gerados")
 W, H = 1280, 720
 
-
 def carregar_fonte(tamanho: int):
     try:
         return ImageFont.truetype(str(ASSETS_DIR / "fonte.ttf"), tamanho)
     except Exception:
         return ImageFont.load_default()
 
-
 def escolher_imagem_base():
-    candidatas = (
-        list(Path("videos_gerados").glob("img_*.jpg")) +
+    candidatas = list(OUTPUT_DIR.glob("img_*.jpg"))
+    if candidatas:
+        return candidatas[0]
+
+    fallback = (
         list(ASSETS_DIR.glob("*.jpg")) +
         list(ASSETS_DIR.glob("*.png")) +
         list(ASSETS_DIR.glob("*.jpeg"))
     )
-    if not candidatas:
-        raise RuntimeError("Nenhuma imagem disponível para thumbnail.")
-    return candidatas[0]
+
+    if not fallback:
+        raise RuntimeError("Nenhuma imagem disponível para gerar thumbnail.")
+
+    return fallback[0]
 
 
 def gerar_thumbnail(headline: str, output_path: str = "videos_gerados/thumb.jpg"):

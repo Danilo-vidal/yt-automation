@@ -30,9 +30,6 @@ def executar_pipeline():
     if resultado["score_viral"] < 5:
         print("[WARN] Score baixo, mas continuando gerando mesmo assim.")
 
-    print("[THUMB] Gerando thumbnail...")
-    gerar_thumbnail(resultado["headline_capa"])
-
     texto_audio = resultado["roteiro"]
     texto_audio = texto_audio.replace(".", ".\n")
     texto_audio = texto_audio.replace("!", "!\n")
@@ -49,9 +46,13 @@ def executar_pipeline():
     noticia_para_video = {
         "titulo": resultado["titulo_youtube"],
         "resumo": resultado["resumo_noticia"],
+        "roteiro_legenda": texto_audio,
     }
 
     video_path = montar_video(noticia_para_video, AUDIO_PATH)
+    
+    print("[THUMB] Gerando thumbnail...")
+    gerar_thumbnail(resultado["headline_capa"])
 
     print("\n[SUCESSO]")
     print(f"Vídeo gerado com sucesso em: {video_path}")

@@ -164,7 +164,7 @@ def montar_slideshow(frames: List[Path], audio_path: Path, srt_path: Path, durac
 
     srt_escaped = str(srt_path.resolve()).replace("\\", "/").replace(":", "\\:")
     filtros.append(
-    f"[vout]subtitles='{srt_escaped}':"
+    f"[vout]subtitles='{srt_escaped}':force_style='FontName=Arial,FontSize=12,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BackColour=&H00000000,Outline=2,Shadow=0,Alignment=2,MarginV=260,Spacing=0,Bold=1'[vfinal]"
     f"force_style='FontName=Arial,FontSize=14,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BackColour=&H00000000,Outline=2,Shadow=0,Alignment=2,MarginV=140,Spacing=0,Bold=1'[vfinal]"
   )
 
@@ -244,7 +244,8 @@ def concatenar_video(corpo_path: Path) -> Path:
 def montar_video(noticia: dict, audio_path: Path) -> Path:
     duracao = mutagen.mp3.MP3(str(audio_path)).info.length
     frames_brutos = buscar_imagens(" ".join(noticia["titulo"].split()[:4]), quantidade=5)
-    srt_path = gerar_srt_simples(noticia["resumo"] or noticia["titulo"], audio_path)
+    srt_texto = noticia.get("roteiro_legenda") or noticia.get("resumo") or noticia.get("titulo")
+    srt_path = gerar_srt_simples(srt_texto, audio_path)
     frames_compostos = [compor_frame(img, noticia["titulo"], i) for i, img in enumerate(frames_brutos)]
     corpo = montar_slideshow(frames_compostos, audio_path, srt_path, duracao)
     corpo = adicionar_trilha(corpo)
