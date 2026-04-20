@@ -4,10 +4,10 @@ on:
   workflow_dispatch:
 
   schedule:
-  - cron: '0 12 * * *'
-    timezone: 'America/Sao_Paulo'
-  - cron: '0 19 * * *'
-    timezone: 'America/Sao_Paulo'
+    - cron: '0 12 * * *'
+      timezone: 'America/Sao_Paulo'
+    - cron: '0 19 * * *'
+      timezone: 'America/Sao_Paulo'
 
 jobs:
   gerar-video:
@@ -17,7 +17,6 @@ jobs:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       OPENAI_MODEL: ${{ secrets.OPENAI_MODEL }}
       PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
-      
 
     steps:
       - name: Checkout do repositório
@@ -45,8 +44,25 @@ jobs:
           pip install -r requirements.txt
           pip install edge-tts
           pip install openai Pillow
-          pip install beautifulsoup4 openai
+          pip install beautifulsoup4
           pip install google-api-python-client google-auth-oauthlib google-auth-httplib2
+
+      - name: Criar arquivos de credenciais
+        shell: powershell
+        run: |
+          Set-Content -Path client_secret.json -Value @'
+          ${{ secrets.YOUTUBE_CLIENT_SECRET }}
+          '@
+
+          Set-Content -Path youtube_token.json -Value @'
+          ${{ secrets.YOUTUBE_TOKEN }}
+          '@
+
+      - name: Verificar arquivos de credenciais
+        shell: powershell
+        run: |
+          Write-Host "client_secret existe? " (Test-Path ".\client_secret.json")
+          Write-Host "youtube_token existe? " (Test-Path ".\youtube_token.json")
 
       - name: Limpar cache de notícias
         shell: powershell
