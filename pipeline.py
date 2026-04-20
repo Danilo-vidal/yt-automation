@@ -6,6 +6,7 @@ from gerador_roteiro import chamar_openai, salvar_resultado
 from tts_google import gerar_audio_google
 from montador_video import montar_video
 from gerar_thumbnail import gerar_thumbnail
+from youtube_uploader import upload_video
 
 load_dotenv()
 
@@ -108,6 +109,28 @@ def executar_pipeline():
     print("\n[SUCESSO]")
     print(f"Vídeo gerado com sucesso em: {video_path}")
     print(f"Thumbnail gerada com sucesso em: {THUMB_PATH}")
+    
+    descricao = f"""{resultado.get('resumo_noticia', '')}
+
+    #política #notícias #brasil
+    """
+
+tags = [
+    "política",
+    "notícias",
+    "brasil",
+    "shorts",
+]
+
+upload_video(
+    video_file=str(video_path),
+    title=resultado.get("titulo_youtube", "Notícia do dia"),
+    description=descricao,
+    tags=tags,
+    category_id="25",   # News & Politics
+    privacy_status="private",
+    thumbnail_file=str(THUMB_PATH),
+)
 
 
 if __name__ == "__main__":
