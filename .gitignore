@@ -9,3 +9,5 @@ roteiro_gerado.json
 noticias_vistas.json
 videos_gerados/
 *.pyc
+client_secret*.json
+youtube_token.json
