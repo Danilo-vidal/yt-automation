@@ -52,7 +52,7 @@ def upload_video(
         "snippet": {
             "title": title[:100],
             "description": description[:5000],
-            "tags": tags[:500],
+            "tags": tags,
             "categoryId": category_id,
         },
         "status": {
