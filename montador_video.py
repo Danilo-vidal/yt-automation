@@ -1,596 +1,211 @@
-import os
-import base64
 import subprocess
 from pathlib import Path
-from datetime import datetime
-from typing import List
-
-import requests
-from bs4 import BeautifulSoup
-from PIL import Image, ImageDraw, ImageFont, ImageEnhance
-import mutagen.mp3
-from openai import OpenAI
-
-
-PEXELS_API_KEY = os.getenv("PEXELS_API_KEY")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 OUTPUT_DIR = Path("videos_gerados")
-ASSETS_DIR = Path("assets")
-W, H = 1080, 1920
-
 OUTPUT_DIR.mkdir(exist_ok=True)
 
-client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
+FPS = 30
 
 
-def extrair_contexto_da_materia(url: str, max_chars: int = 1200) -> str:
-    try:
-        resp = requests.get(
-            url,
-            timeout=15,
-            headers={"User-Agent": "Mozilla/5.0"}
-        )
-        resp.raise_for_status()
-
-        soup = BeautifulSoup(resp.text, "html.parser")
-        paragrafos = [p.get_text(" ", strip=True) for p in soup.find_all("p")]
-        texto = " ".join(paragrafos)
-        texto = " ".join(texto.split())
-        return texto[:max_chars]
-    except Exception as e:
-        print(f"[CONTEXTO] Falha ao extrair matéria: {e}")
-        return ""
-
-
-def gerar_query_imagem(noticia: dict):
-    titulo = (noticia.get("titulo") or "").lower()
-    resumo = (noticia.get("resumo") or "").lower()
-    texto = f"{titulo} {resumo}"
-
-    if any(p in texto for p in ["governo", "lula", "bolsonaro", "presidente", "política", "congresso", "senado", "câmara"]):
-        return "brazil politics protest congress government"
-
-    if any(p in texto for p in ["crime", "polícia", "assalto", "prisão", "operação", "investigação"]):
-        return "police operation arrest investigation brazil"
-
-    if any(p in texto for p in ["guerra", "ataque", "militar", "míssil", "soldado"]):
-        return "war military conflict soldiers"
-
-    if any(p in texto for p in ["economia", "inflação", "dinheiro", "mercado", "dólar", "bolsa"]):
-        return "economy money crisis finance business graph"
-
-    if any(p in texto for p in ["protesto", "manifestação", "rua", "crise"]):
-        return "protest crowd tension street demonstration"
-
-    return "breaking news dramatic scene"
-
-
-def gerar_queries_alternativas(noticia: dict) -> List[str]:
-    titulo = (noticia.get("titulo") or "").strip()
-    resumo = (noticia.get("resumo") or "").strip()
-    base = gerar_query_imagem(noticia)
-
-    queries = [
-        base,
-        titulo,
-        resumo[:80] if resumo else "",
-        f"{base} news",
-        f"{base} brazil",
-        "breaking news politics",
-        "news protest crowd government",
-    ]
-
-    limpas = []
-    vistos = set()
-    for q in queries:
-        q = " ".join((q or "").split()).strip()
-        if q and q.lower() not in vistos:
-            vistos.add(q.lower())
-            limpas.append(q)
-
-    return limpas
-
-
-def gerar_prompt_visual(noticia: dict, contexto_extra: str) -> str:
-    titulo = noticia.get("titulo", "")
-    resumo = noticia.get("resumo", "")
-
-    return f"""
-Crie uma imagem em estilo fotojornalístico realista, vertical, para vídeo curto de notícias.
-
-Tema principal:
-{titulo}
-
-Resumo:
-{resumo}
-
-Contexto adicional:
-{contexto_extra}
-
-Diretrizes visuais:
-- cena coerente com notícia política ou factual
-- clima jornalístico
-- composição vertical forte
-- elementos visuais compatíveis com o tema
-- sem texto na imagem
-- sem letras
-- sem logos
-- sem marca d'água
-- aparência realista
-- iluminação cinematográfica
-- estilo foto de reportagem
-"""
-
-
-def gerar_imagem_ia_para_video(prompt: str, output_path: Path) -> Path:
-    if not client:
-        raise RuntimeError("OPENAI_API_KEY não configurada para geração de imagem IA.")
-
-    print("[IMG IA] Gerando imagem contextual para o vídeo...")
-
-    img = client.images.generate(
-        model="gpt-image-1",
-        prompt=prompt,
-        size="1024x1536"
-    )
-
-    b64 = img.data[0].b64_json
-    img_bytes = base64.b64decode(b64)
-    output_path.write_bytes(img_bytes)
-
-    print(f"[IMG IA] Imagem salva em: {output_path}")
-    return output_path
-
-
-def buscar_imagens_pexels(query: str, quantidade: int = 5, prefixo: str = "pexels") -> List[Path]:
-    print(f"[IMAGENS] Query Pexels: {query}")
-    print(f"[IMAGENS] PEXELS_API_KEY presente? {'SIM' if PEXELS_API_KEY else 'NAO'}")
-
-    caminhos: List[Path] = []
-
-    if not PEXELS_API_KEY:
-        return caminhos
-
-    try:
-        url = "https://api.pexels.com/v1/search"
-        headers = {"Authorization": PEXELS_API_KEY}
-        params = {
-            "query": query,
-            "per_page": quantidade,
-            "orientation": "portrait",
-            "page": 1,
-        }
-
-        resp = requests.get(url, headers=headers, params=params, timeout=20)
-        print(f"[IMAGENS] Status Pexels: {resp.status_code}")
-        resp.raise_for_status()
-
-        fotos = resp.json().get("photos", [])
-        print(f"[IMAGENS] Fotos retornadas: {len(fotos)}")
-
-        for i, foto in enumerate(fotos):
-            img_url = foto["src"]["large2x"]
-            img_path = OUTPUT_DIR / f"img_{prefixo}_{i}.jpg"
-
-            img_resp = requests.get(img_url, timeout=20)
-            img_resp.raise_for_status()
-            img_path.write_bytes(img_resp.content)
-            caminhos.append(img_path)
-
-        print(f"[IMAGENS] Baixadas do Pexels: {len(caminhos)}")
-
-    except Exception as e:
-        print(f"[WARN] Falha no Pexels para query '{query}'. Detalhe: {e}")
-
-    return caminhos
-
-
-def buscar_imagens_pexels_multiplas(noticia: dict, quantidade_total: int = 4) -> List[Path]:
-    queries = gerar_queries_alternativas(noticia)
-    coletadas: List[Path] = []
-    vistos = set()
-
-    for idx, query in enumerate(queries):
-        faltam = quantidade_total - len(coletadas)
-        if faltam <= 0:
-            break
-
-        resultados = buscar_imagens_pexels(
-            query=query,
-            quantidade=min(3, faltam),
-            prefixo=f"q{idx}"
-        )
-
-        for p in resultados:
-            key = str(p.resolve())
-            if key not in vistos:
-                vistos.add(key)
-                coletadas.append(p)
-
-        print(f"[IMAGENS] Total acumulado após query {idx + 1}: {len(coletadas)}")
-
-    return coletadas[:quantidade_total]
-
-
-def buscar_imagens_locais(quantidade: int = 5) -> List[Path]:
-    locais = (
-        list(ASSETS_DIR.glob("*.jpg"))
-        + list(ASSETS_DIR.glob("*.png"))
-        + list(ASSETS_DIR.glob("*.jpeg"))
-    )
-    print(f"[IMAGENS] Assets locais encontrados: {len(locais)}")
-    return locais[:quantidade]
-
-
-def gerar_frames_dinamicos_de_uma_imagem(base_path: Path, quantidade: int = 5) -> List[Path]:
-    if not base_path.exists():
-        return []
-
-    print(f"[IMAGENS] Gerando {quantidade} frames dinâmicos a partir de: {base_path}")
-
-    base = Image.open(base_path).convert("RGB")
-    w, h = base.size
-
-    variacoes = []
-    recortes = [
-        (0.00, 0.00, 1.00, 1.00),
-        (0.05, 0.02, 0.95, 0.98),
-        (0.00, 0.00, 0.90, 0.95),
-        (0.10, 0.03, 1.00, 0.98),
-        (0.03, 0.05, 0.97, 0.90),
-    ]
-
-    for i in range(min(quantidade, len(recortes))):
-        x1p, y1p, x2p, y2p = recortes[i]
-
-        x1 = int(w * x1p)
-        y1 = int(h * y1p)
-        x2 = int(w * x2p)
-        y2 = int(h * y2p)
-
-        img = base.crop((x1, y1, x2, y2)).resize((w, h), Image.LANCZOS)
-
-        if i == 1:
-            img = ImageEnhance.Contrast(img).enhance(1.08)
-        elif i == 2:
-            img = ImageEnhance.Brightness(img).enhance(0.95)
-        elif i == 3:
-            img = ImageEnhance.Sharpness(img).enhance(1.12)
-        elif i == 4:
-            img = ImageEnhance.Color(img).enhance(0.92)
-
-        out = OUTPUT_DIR / f"img_force_{i}.jpg"
-        img.save(out, quality=95)
-        variacoes.append(out)
-
-    return variacoes
-
-
-def obter_frames_visuais(noticia: dict, quantidade_total: int = 5) -> List[Path]:
-    frames: List[Path] = []
-
-    url = noticia.get("url", "") or noticia.get("link", "")
-    contexto_extra = extrair_contexto_da_materia(url) if url else ""
-
-    img_ia_path = OUTPUT_DIR / "img_ia_0.jpg"
-    prompt_visual = gerar_prompt_visual(noticia, contexto_extra)
-
-    try:
-        gerar_imagem_ia_para_video(prompt_visual, img_ia_path)
-        frames.append(img_ia_path)
-    except Exception as e:
-        print(f"[IMG IA] Falha ao gerar imagem IA: {e}")
-
-    faltam = max(0, quantidade_total - len(frames))
-    if faltam > 0:
-        pexels = buscar_imagens_pexels_multiplas(noticia, quantidade_total=faltam)
-        frames.extend(pexels)
-
-    if len(frames) < quantidade_total:
-        faltam = quantidade_total - len(frames)
-        locais = buscar_imagens_locais(quantidade=faltam)
-        frames.extend(locais)
-
-    unicos: List[Path] = []
-    vistos = set()
-    for p in frames:
-        key = str(Path(p).resolve())
-        if key not in vistos:
-            vistos.add(key)
-            unicos.append(Path(p))
-
-    frames = unicos
-
-    if frames and len(frames) < quantidade_total:
-        print("[IMAGENS] Poucas imagens encontradas. Forçando frames dinâmicos.")
-        frames = gerar_frames_dinamicos_de_uma_imagem(frames[0], quantidade=quantidade_total)
-
-    print(f"[IMAGENS] Total final de frames visuais: {len(frames)}")
-    for i, frame in enumerate(frames, 1):
-        print(f"[IMAGENS] Frame {i}: {frame}")
-
-    return frames[:quantidade_total]
-
-
-def formatar_tempo_srt(segundos: float) -> str:
-    h = int(segundos // 3600)
-    m = int((segundos % 3600) // 60)
-    s = int(segundos % 60)
-    ms = int((segundos % 1) * 1000)
-    return f"{h:02}:{m:02}:{s:02},{ms:03}"
-
-
-def agrupar_legendas(palavras, max_palavras=2, max_chars=16):
-    grupos = []
-    atual = []
-
-    for palavra in palavras:
-        teste = " ".join(atual + [palavra])
-
-        if atual and (len(atual) >= max_palavras or len(teste) > max_chars):
-            grupos.append(" ".join(atual))
-            atual = [palavra]
-        else:
-            atual.append(palavra)
-
-    if atual:
-        grupos.append(" ".join(atual))
-
-    return grupos
-
-
-def gerar_srt_simples(texto: str, audio_path: Path) -> Path:
-    import re
-
-    duracao = mutagen.mp3.MP3(str(audio_path)).info.length
-    texto = re.sub(r"\s+", " ", texto).strip()
-    palavras = texto.split()
-
-    grupos = agrupar_legendas(palavras, max_palavras=2, max_chars=16)
-    if not grupos:
-        grupos = [texto]
-
-    dur_por_grupo = max((duracao / len(grupos)) * 0.90, 0.55)
-    adiantamento = 0.38
-
-    srt_path = audio_path.with_suffix(".srt")
-
-    inicio = 0.0
-    with open(srt_path, "w", encoding="utf-8") as f:
-        for i, grupo in enumerate(grupos, 1):
-            real_inicio = max(0.0, inicio - adiantamento)
-            fim = inicio + dur_por_grupo
-
-            f.write(
-                f"{i}\n"
-                f"{formatar_tempo_srt(real_inicio)} --> {formatar_tempo_srt(fim)}\n"
-                f"{grupo}\n\n"
-            )
-
-            inicio = fim
-
-    print(f"[LEGENDA] SRT gerado em: {srt_path}")
-    return srt_path
-
-
-def compor_frame(img_path: Path, titulo: str, indice: int) -> Path:
-    img = Image.open(img_path).convert("RGB")
-    img_ratio = img.width / img.height
-    target_ratio = W / H
-
-    if img_ratio > target_ratio:
-        novo_h = H
-        novo_w = int(H * img_ratio)
+def run(cmd):
+    print("\n[FFMPEG CMD]")
+    if isinstance(cmd, list):
+        print(" ".join(map(str, cmd)))
     else:
-        novo_w = W
-        novo_h = int(W / img_ratio)
-
-    img = img.resize((novo_w, novo_h), Image.LANCZOS)
-    left = (novo_w - W) // 2
-    top = (novo_h - H) // 2
-    img = img.crop((left, top, left + W, top + H))
-
-    draw = ImageDraw.Draw(img)
-
-    draw.rectangle([0, 0, W, 140], fill=(12, 12, 12))
-    draw.rectangle([0, 0, 10, 140], fill=(220, 30, 30))
-
-    try:
-        fonte_titulo = ImageFont.truetype(str(ASSETS_DIR / "fonte.ttf"), 44)
-        fonte_canal = ImageFont.truetype(str(ASSETS_DIR / "fonte.ttf"), 26)
-    except Exception:
-        fonte_titulo = ImageFont.load_default()
-        fonte_canal = ImageFont.load_default()
-
-    titulo_curto = titulo[:85] + "..." if len(titulo) > 85 else titulo
-    draw.text((26, 14), titulo_curto, font=fonte_titulo, fill=(255, 255, 255))
-    draw.text((26, 58), "POLÍTICA AGORA", font=fonte_canal, fill=(220, 220, 220))
-
-    logo_path = ASSETS_DIR / "logo.png"
-    if logo_path.exists():
-        logo = Image.open(logo_path).convert("RGBA").resize((54, 54))
-        img.paste(logo, (W - 80, 18), logo)
-
-    frame_path = OUTPUT_DIR / f"frame_{indice:03d}.jpg"
-    img.save(frame_path, quality=95)
-    return frame_path
-
-
-def criar_clipe_por_frame(frame: Path, indice: int, duracao: float) -> Path:
-    clip_path = OUTPUT_DIR / f"clip_{indice:03d}.mp4"
-
-    if indice % 2 == 0:
-        vf = (
-            f"scale=2200:-1,"
-            f"zoompan=z='min(zoom+0.0008,1.08)':"
-            f"x='iw/2-(iw/zoom/2)':"
-            f"y='ih/2-(ih/zoom/2)':"
-            f"d={int(duracao * 25)}:s={W}x{H}:fps=25,"
-            f"setsar=1"
-        )
-    else:
-        vf = (
-            f"scale=2200:-1,"
-            f"zoompan=z='if(lte(zoom,1.0),1.08,max(zoom-0.0008,1.0))':"
-            f"x='iw/2-(iw/zoom/2)':"
-            f"y='ih/2-(ih/zoom/2)':"
-            f"d={int(duracao * 25)}:s={W}x{H}:fps=25,"
-            f"setsar=1"
-        )
-
-    cmd = [
-        "ffmpeg", "-y",
-        "-loop", "1",
-        "-i", str(frame),
-        "-t", str(duracao),
-        "-vf", vf,
-        "-r", "25",
-        "-c:v", "libx264",
-        "-preset", "fast",
-        "-crf", "22",
-        "-pix_fmt", "yuv420p",
-        str(clip_path),
-    ]
-
-    print(f"[FFMPEG] Criando clipe do frame {indice}: {frame.name}")
+        print(cmd)
     subprocess.run(cmd, check=True)
-    return clip_path
 
 
-def montar_slideshow(frames: List[Path], audio_path: Path, srt_path: Path, duracao_audio: float) -> Path:
-    if not frames:
-        raise RuntimeError("Nenhum frame disponível para montar o slideshow.")
+def limpar_clips_antigos():
+    for pattern in ["clip_*.mp4", "video_sem_audio.mp4", "video_final.mp4", "lista.txt", "legenda.srt"]:
+        for f in OUTPUT_DIR.glob(pattern):
+            f.unlink(missing_ok=True)
 
-    duracao_por_frame = duracao_audio / len(frames)
-    clips = []
 
-    for i, frame in enumerate(frames):
-        clip = criar_clipe_por_frame(frame, i, duracao_por_frame)
-        clips.append(clip)
-
-    lista_clips = OUTPUT_DIR / "lista_clips.txt"
-    with open(lista_clips, "w", encoding="utf-8") as f:
-        for clip in clips:
-            f.write(f"file '{clip.resolve()}'\n")
-
-    slideshow_base = OUTPUT_DIR / "slideshow_base.mp4"
-    cmd_concat = [
-        "ffmpeg", "-y",
-        "-f", "concat",
-        "-safe", "0",
-        "-i", str(lista_clips),
-        "-c", "copy",
-        str(slideshow_base),
-    ]
-    print("[FFMPEG] Concatenando clips do slideshow...")
-    subprocess.run(cmd_concat, check=True)
-
-    corpo_path = OUTPUT_DIR / "corpo.mp4"
-    srt_escaped = str(srt_path.resolve()).replace("\\", "/").replace(":", "\\:")
-
-    vf_final = (
-        f"drawbox=x=0:y={H-220}:w={W}:h=220:color=black@0.88:t=fill,"
-        f"subtitles='{srt_escaped}':force_style='FontName=Arial,FontSize=18,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BackColour=&H00000000,Outline=2,Shadow=0,Alignment=2,MarginV=65,Bold=1'"
-    )
-
-    cmd_final = [
-        "ffmpeg", "-y",
-        "-i", str(slideshow_base),
+def get_audio_duration(audio_path: Path) -> float:
+    cmd = [
+        "ffprobe",
         "-i", str(audio_path),
-        "-vf", vf_final,
-        "-map", "0:v",
-        "-map", "1:a",
-        "-c:v", "libx264",
-        "-preset", "fast",
-        "-crf", "22",
-        "-c:a", "aac",
-        "-b:a", "160k",
-        "-shortest",
-        "-movflags", "+faststart",
-        str(corpo_path),
+        "-show_entries", "format=duration",
+        "-v", "quiet",
+        "-of", "csv=p=0",
     ]
-
-    print(f"[FFMPEG] Quantidade de entradas de imagem: {len(frames)}")
-    subprocess.run(cmd_final, check=True)
-    return corpo_path
+    result = subprocess.check_output(cmd).decode().strip()
+    return float(result)
 
 
-def adicionar_trilha(corpo_path: Path) -> Path:
-    trilha = ASSETS_DIR / "trilha.mp3"
-    if not trilha.exists():
-        return corpo_path
+def criar_clipe_com_zoom(img_path: Path, duracao: float, index: int) -> Path:
+    out = OUTPUT_DIR / f"clip_{index}.mp4"
+    frames = max(1, int(duracao * FPS))
 
-    saida = OUTPUT_DIR / "corpo_com_trilha.mp4"
+    vf = (
+        f"scale=1080:1920:force_original_aspect_ratio=increase,"
+        f"crop=1080:1920,"
+        f"zoompan=z='min(zoom+0.001,1.1)':"
+        f"d={frames}:"
+        f"x='iw/2-(iw/zoom/2)':"
+        f"y='ih/2-(ih/zoom/2)':"
+        f"s=1080x1920:fps={FPS}"
+    )
 
     cmd = [
-        "ffmpeg", "-y",
-        "-i", str(corpo_path),
-        "-stream_loop", "-1", "-i", str(trilha),
-        "-filter_complex",
-        "[1:a]volume=0.08[bg];[0:a][bg]amix=inputs=2:duration=first:dropout_transition=2[aout]",
-        "-map", "0:v",
-        "-map", "[aout]",
-        "-c:v", "copy",
-        "-c:a", "aac",
-        "-b:a", "192k",
-        "-shortest",
-        str(saida),
+        "ffmpeg",
+        "-y",
+        "-loop", "1",
+        "-i", str(img_path.resolve()),
+        "-vf", vf,
+        "-t", str(duracao),
+        "-pix_fmt", "yuv420p",
+        str(out),
     ]
 
-    print("[AUDIO] Adicionando trilha...")
-    subprocess.run(cmd, check=True)
-    return saida
+    run(cmd)
+
+    if not out.exists():
+        raise RuntimeError(f"Erro ao gerar clip: {out}")
+
+    return out
 
 
-def concatenar_video(corpo_path: Path) -> Path:
-    intro_path = ASSETS_DIR / "intro.mp4"
-    outro_path = ASSETS_DIR / "outro.mp4"
-    final_path = OUTPUT_DIR / f"video_{datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4"
-    lista_path = OUTPUT_DIR / "lista_concat.txt"
+def gerar_srt(texto: str, duracao_total: float, path: Path):
+    linhas = [l.strip() for l in texto.split("\n") if l.strip()]
+    dur_por_linha = duracao_total / max(len(linhas), 1)
 
-    partes = []
-    if intro_path.exists():
-        partes.append(intro_path)
-    partes.append(corpo_path)
-    if outro_path.exists():
-        partes.append(outro_path)
+    def format_time(s):
+        h = int(s // 3600)
+        m = int((s % 3600) // 60)
+        sec = int(s % 60)
+        ms = int((s - int(s)) * 1000)
+        return f"{h:02}:{m:02}:{sec:02},{ms:03}"
 
-    with open(lista_path, "w", encoding="utf-8") as f:
-        for p in partes:
-            f.write(f"file '{p.resolve()}'\n")
+    atual = 0.0
+    with open(path, "w", encoding="utf-8") as f:
+        for i, linha in enumerate(linhas, 1):
+            inicio = atual + 0.3
+            fim = inicio + dur_por_linha
+            f.write(f"{i}\n")
+            f.write(f"{format_time(inicio)} --> {format_time(fim)}\n")
+            f.write(linha + "\n\n")
+            atual += dur_por_linha
+
+
+def concatenar_clips(clips):
+    lista = OUTPUT_DIR / "lista.txt"
+    with open(lista, "w", encoding="utf-8") as f:
+        for c in clips:
+            f.write(f"file '{c.resolve().as_posix()}'\n")
+
+    out = OUTPUT_DIR / "video_sem_audio.mp4"
 
     cmd = [
-        "ffmpeg", "-y",
+        "ffmpeg",
+        "-y",
         "-f", "concat",
         "-safe", "0",
-        "-i", str(lista_path),
+        "-i", str(lista),
         "-c", "copy",
-        str(final_path),
+        str(out),
     ]
+    run(cmd)
 
-    print("[VIDEO] Concatenando vídeo final...")
-    subprocess.run(cmd, check=True)
-    return final_path
+    if not out.exists():
+        raise RuntimeError(f"Erro ao concatenar clips: {out}")
+
+    return out
+
+
+def adicionar_audio_e_legenda(video: Path, audio: Path, srt: Path) -> Path:
+    final = OUTPUT_DIR / "video_final.mp4"
+    srt_str = srt.resolve().as_posix().replace(":", "\\:")
+
+    vf = (
+        f"subtitles='{srt_str}':"
+        f"force_style='Fontsize=80,Outline=3,Shadow=0,MarginV=50,Alignment=2,BackColour=&H80000000'"
+    )
+
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-i", str(video),
+        "-i", str(audio),
+        "-vf", vf,
+        "-c:v", "libx264",
+        "-c:a", "aac",
+        "-shortest",
+        str(final),
+    ]
+    run(cmd)
+
+    if not final.exists():
+        raise RuntimeError(f"Erro ao gerar vídeo final: {final}")
+
+    return final
+
+
+def buscar_imagens():
+    imagens = []
+    imagens.extend(sorted(OUTPUT_DIR.glob("img_*.jpg")))
+    imagens.extend(sorted(OUTPUT_DIR.glob("img_*.png")))
+    imagens.extend(sorted(OUTPUT_DIR.glob("*.jpg")))
+    imagens.extend(sorted(OUTPUT_DIR.glob("*.png")))
+
+    if not imagens:
+        imagens.extend(sorted(Path(".").glob("img_*.jpg")))
+        imagens.extend(sorted(Path(".").glob("img_*.png")))
+        imagens.extend(sorted(Path(".").glob("*.jpg")))
+        imagens.extend(sorted(Path(".").glob("*.png")))
+
+    unicas = []
+    vistos = set()
+    for img in imagens:
+        p = str(img.resolve())
+        if p not in vistos:
+            vistos.add(p)
+            unicas.append(img)
+
+    return unicas
+
+
+def criar_fallback():
+    fallback = OUTPUT_DIR / "fallback.jpg"
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-f", "lavfi",
+        "-i", "color=c=black:s=1080x1920:d=1",
+        "-frames:v", "1",
+        str(fallback),
+    ]
+    run(cmd)
+    return fallback
 
 
 def montar_video(noticia: dict, audio_path: Path) -> Path:
-    duracao = mutagen.mp3.MP3(str(audio_path)).info.length
+    print("[VIDEO V2] Iniciando montagem com zoom...")
 
-    frames_brutos = obter_frames_visuais(noticia, quantidade_total=5)
-    if not frames_brutos:
-        raise RuntimeError("Nenhuma imagem encontrada para montar o vídeo.")
+    limpar_clips_antigos()
 
-    srt_texto = noticia.get("roteiro_legenda") or noticia.get("resumo") or noticia.get("titulo")
-    srt_path = gerar_srt_simples(srt_texto, audio_path)
+    imagens = buscar_imagens()
+    print(f"[DEBUG] Imagens encontradas: {[i.name for i in imagens]}")
 
-    frames_compostos = [
-        compor_frame(img, noticia.get("titulo", "Notícia"), i)
-        for i, img in enumerate(frames_brutos)
-    ]
+    if not imagens:
+        print("[WARN] Nenhuma imagem encontrada, criando fallback...")
+        imagens = [criar_fallback()]
 
-    print(f"[VIDEO] Quantidade de frames compostos: {len(frames_compostos)}")
+    duracao_total = get_audio_duration(audio_path)
+    dur_por_img = duracao_total / len(imagens)
 
-    corpo = montar_slideshow(frames_compostos, audio_path, srt_path, duracao)
-    corpo = adicionar_trilha(corpo)
-    return concatenar_video(corpo)
+    clips = []
+    for i, img in enumerate(imagens):
+        print(f"[VIDEO] Criando clipe com zoom: {img.name}")
+        clips.append(criar_clipe_com_zoom(img, dur_por_img, i))
+
+    video_base = concatenar_clips(clips)
+
+    srt_path = OUTPUT_DIR / "legenda.srt"
+    gerar_srt(noticia["roteiro_legenda"], duracao_total, srt_path)
+
+    final = adicionar_audio_e_legenda(video_base, audio_path, srt_path)
+
+    print("[VIDEO V2] Finalizado")
+    return final

@@ -1,0 +1,18 @@
+[
+  {
+    "id": "politica",
+    "nome": "Política Agora",
+    "tema": "política brasil",
+    "tags": ["política", "brasil", "congresso", "shorts"],
+    "token_file": "youtube_token_politica.json",
+    "client_file": "client_secret_politica.json"
+  },
+  {
+    "id": "tech",
+    "nome": "Tech Agora",
+    "tema": "tecnologia ia",
+    "tags": ["tecnologia", "ia", "inovação", "shorts"],
+    "token_file": "youtube_token_tech.json",
+    "client_file": "client_secret_tech.json"
+  }
+]
