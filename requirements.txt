@@ -9,3 +9,4 @@ Pillow
 mutagen
 Pillow
 beautifulsoup4
+google-genai
