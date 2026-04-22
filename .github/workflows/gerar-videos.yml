@@ -17,6 +17,8 @@ jobs:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       OPENAI_MODEL: ${{ secrets.OPENAI_MODEL }}
       PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      GEMINI_MODEL: ${{ secrets.GEMINI_MODEL }}
       
 
     steps:
@@ -45,6 +47,7 @@ jobs:
           pip install -r requirements.txt
           pip install edge-tts
           pip install openai Pillow
+          pip install google-genai
 
       - name: Limpar cache de notícias
         shell: powershell
