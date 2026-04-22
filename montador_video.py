@@ -403,7 +403,7 @@ def gerar_srt_simples(texto: str, audio_path: Path) -> Path:
         grupos = [texto]
 
     dur_por_grupo = max((duracao / len(grupos)) * 0.90, 0.55)
-    adiantamento = 0.12
+    adiantamento = 0.8
 
     srt_path = audio_path.with_suffix(".srt")
 
