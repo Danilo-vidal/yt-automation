@@ -185,11 +185,8 @@ def buscar_imagens_pexels(query: str, quantidade: int = 5, prefixo: str = "pexel
 
     return caminhos
 
+
 def gerar_frames_dinamicos_de_uma_imagem(base_path: Path, quantidade: int = 5) -> List[Path]:
-    """
-    Cria vários frames visuais a partir de uma única imagem base,
-    com crops e tratamentos diferentes para forçar mudança no vídeo.
-    """
     if not base_path.exists():
         return []
 
@@ -200,11 +197,11 @@ def gerar_frames_dinamicos_de_uma_imagem(base_path: Path, quantidade: int = 5) -
 
     variacoes = []
     recortes = [
-        (0.00, 0.00, 1.00, 1.00),  # original
-        (0.05, 0.02, 0.95, 0.98),  # crop central
-        (0.00, 0.00, 0.90, 0.95),  # esquerda
-        (0.10, 0.03, 1.00, 0.98),  # direita
-        (0.03, 0.05, 0.97, 0.90),  # topo/centro
+        (0.00, 0.00, 1.00, 1.00),
+        (0.05, 0.02, 0.95, 0.98),
+        (0.00, 0.00, 0.90, 0.95),
+        (0.10, 0.03, 1.00, 0.98),
+        (0.03, 0.05, 0.97, 0.90),
     ]
 
     for i in range(min(quantidade, len(recortes))):
@@ -231,6 +228,7 @@ def gerar_frames_dinamicos_de_uma_imagem(base_path: Path, quantidade: int = 5) -
         variacoes.append(out)
 
     return variacoes
+
 
 def buscar_imagens_pexels_multiplas(noticia: dict, quantidade_total: int = 4) -> List[Path]:
     queries = gerar_queries_alternativas(noticia)
@@ -270,10 +268,6 @@ def buscar_imagens_locais(quantidade: int = 5) -> List[Path]:
 
 
 def gerar_variacoes_de_imagem(base_path: Path, quantidade: int = 4) -> List[Path]:
-    """
-    Gera variações visuais da mesma imagem para impedir vídeo estático
-    quando não houver imagens suficientes vindas da internet.
-    """
     if not base_path.exists():
         return []
 
@@ -286,18 +280,14 @@ def gerar_variacoes_de_imagem(base_path: Path, quantidade: int = 4) -> List[Path
         img = base.copy()
 
         if i == 0:
-            # original levemente realçada
             img = ImageEnhance.Contrast(img).enhance(1.08)
         elif i == 1:
-            # crop mais fechado
             w, h = img.size
             img = img.crop((int(w * 0.05), int(h * 0.03), int(w * 0.95), int(h * 0.97)))
             img = img.resize((w, h), Image.LANCZOS)
         elif i == 2:
-            # brilho levemente menor
             img = ImageEnhance.Brightness(img).enhance(0.92)
         elif i == 3:
-            # nitidez + crop diferente
             w, h = img.size
             img = img.crop((0, int(h * 0.02), int(w * 0.92), int(h * 0.98)))
             img = img.resize((w, h), Image.LANCZOS)
@@ -313,12 +303,12 @@ def gerar_variacoes_de_imagem(base_path: Path, quantidade: int = 4) -> List[Path
 
 
 def obter_frames_visuais(noticia: dict, quantidade_total: int = 5) -> List[Path]:
+    quantidade_total = max(3, quantidade_total)
     frames: List[Path] = []
 
     url = noticia.get("url", "") or noticia.get("link", "")
     contexto_extra = extrair_contexto_da_materia(url) if url else ""
 
-    # 1 imagem IA principal
     img_ia_path = OUTPUT_DIR / "img_ia_0.jpg"
     prompt_visual = gerar_prompt_visual(noticia, contexto_extra)
 
@@ -328,19 +318,16 @@ def obter_frames_visuais(noticia: dict, quantidade_total: int = 5) -> List[Path]
     except Exception as e:
         print(f"[IMG IA] Falha ao gerar imagem IA: {e}")
 
-    # tenta completar com Pexels
     faltam = max(0, quantidade_total - len(frames))
     if faltam > 0:
         pexels = buscar_imagens_pexels_multiplas(noticia, quantidade_total=faltam)
         frames.extend(pexels)
 
-    # fallback local
     if len(frames) < quantidade_total:
         faltam = quantidade_total - len(frames)
         locais = buscar_imagens_locais(quantidade=faltam)
         frames.extend(locais)
 
-    # remove duplicados
     unicos: List[Path] = []
     vistos = set()
     for p in frames:
@@ -351,11 +338,24 @@ def obter_frames_visuais(noticia: dict, quantidade_total: int = 5) -> List[Path]
 
     frames = unicos
 
-    # se no final vier menos que 5, força 5 frames a partir da primeira imagem
     if frames:
+        if len(frames) < 3:
+            print("[IMAGENS] Menos de 3 imagens encontradas. Completando com variações da principal.")
+            extras = gerar_frames_dinamicos_de_uma_imagem(frames[0], quantidade=3)
+            for extra in extras:
+                if len(frames) >= 3:
+                    break
+                if extra not in frames:
+                    frames.append(extra)
+
         if len(frames) < quantidade_total:
-            print("[IMAGENS] Poucas imagens encontradas. Forçando frames dinâmicos.")
-            frames = gerar_frames_dinamicos_de_uma_imagem(frames[0], quantidade=quantidade_total)
+            print("[IMAGENS] Completando frames restantes com variações visuais.")
+            extras = gerar_frames_dinamicos_de_uma_imagem(frames[0], quantidade=quantidade_total)
+            for extra in extras:
+                if len(frames) >= quantidade_total:
+                    break
+                if extra not in frames:
+                    frames.append(extra)
 
     print(f"[IMAGENS] Total final de frames visuais: {len(frames)}")
     for i, frame in enumerate(frames, 1):
@@ -403,7 +403,7 @@ def gerar_srt_simples(texto: str, audio_path: Path) -> Path:
         grupos = [texto]
 
     dur_por_grupo = max((duracao / len(grupos)) * 0.90, 0.55)
-    adiantamento = 0.40
+    adiantamento = 0.16
 
     srt_path = audio_path.with_suffix(".srt")
 
@@ -505,10 +505,10 @@ def montar_slideshow(frames: List[Path], audio_path: Path, srt_path: Path, durac
 
     srt_escaped = str(srt_path.resolve()).replace("\\", "/").replace(":", "\\:")
     filtros.append(
-        f"[vout]drawbox=x=0:y={H-220}:w={W}:h=220:color=black@0.88:t=fill[bg]"
+        f"[vout]drawbox=x=0:y={H-185}:w={W}:h=185:color=black@0.68:t=fill[bg]"
     )
     filtros.append(
-        f"[bg]subtitles='{srt_escaped}':force_style='FontName=Arial,FontSize=18,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BackColour=&H00000000,Outline=2,Shadow=0,Alignment=2,MarginV=65,Bold=1'[vfinal]"
+        f"[bg]subtitles='{srt_escaped}':force_style='FontName=Arial,FontSize=15,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BackColour=&H00000000,Outline=2,Shadow=0,Alignment=2,MarginV=52,Bold=1'[vfinal]"
     )
 
     filter_complex = ";".join(filtros)
