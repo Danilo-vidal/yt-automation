@@ -466,29 +466,39 @@ def agrupar_legendas(palavras, max_palavras=2, max_chars=16):
 
 
 def gerar_srt_simples(texto: str, audio_path: Path) -> Path:
+    import re
+    import mutagen.mp3
+
     duracao = mutagen.mp3.MP3(str(audio_path)).info.length
+
     texto = re.sub(r"\s+", " ", texto).strip()
-    palavras = texto.split()
 
-    grupos = agrupar_legendas(palavras, max_palavras=2, max_chars=16)
-    if not grupos:
-        grupos = [texto]
+    # divide por frases reais
+    frases = re.split(r"(?<=[\.\!\?\:])\s+", texto)
+    frases = [f.strip() for f in frases if f.strip()]
 
-    dur_por_grupo = max((duracao / len(grupos)) * 0.90, 0.55)
-    adiantamento = 0.16
+    if not frases:
+        frases = [texto]
 
+    # peso por tamanho da frase
+    total_chars = sum(len(f) for f in frases)
     srt_path = audio_path.with_suffix(".srt")
 
     inicio = 0.0
+    atraso_global = 0.12
+
     with open(srt_path, "w", encoding="utf-8") as f:
-        for i, grupo in enumerate(grupos, 1):
-            real_inicio = max(0.0, inicio - adiantamento)
-            fim = inicio + dur_por_grupo
+        for i, frase in enumerate(frases, 1):
+            proporcao = len(frase) / max(total_chars, 1)
+            dur_frase = max(duracao * proporcao, 0.8)
+
+            real_inicio = max(0.0, inicio - atraso_global)
+            fim = inicio + dur_frase
 
             f.write(
                 f"{i}\n"
                 f"{formatar_tempo_srt(real_inicio)} --> {formatar_tempo_srt(fim)}\n"
-                f"{grupo}\n\n"
+                f"{frase}\n\n"
             )
 
             inicio = fim
