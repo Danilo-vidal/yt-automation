@@ -15,11 +15,6 @@ THUMB_PATH = Path("videos_gerados/thumb.jpg")
 
 
 def extrair_url_noticia(resultado: dict, noticias: list) -> str:
-    """
-    Tenta descobrir a URL da notícia escolhida usando:
-    1. campos já existentes no resultado da IA
-    2. comparação do título escolhido com a lista original de notícias
-    """
     for chave in ["url_noticia", "url", "link", "fonte_url"]:
         valor = resultado.get(chave)
         if valor:
@@ -100,14 +95,18 @@ def executar_pipeline():
     video_path = montar_video(noticia_para_video, AUDIO_PATH)
 
     print("[THUMB] Gerando thumbnail...")
-    gerar_thumbnail(resultado["headline_capa"])
-
-    if not THUMB_PATH.exists():
-        raise RuntimeError(f"Thumbnail não foi criada em {THUMB_PATH}")
+    try:
+        gerar_thumbnail(resultado.get("headline_capa") or resultado.get("titulo_youtube") or "Notícia do dia")
+    except Exception as e:
+        print(f"[WARN] Falha ao gerar thumbnail: {e}")
 
     print("\n[SUCESSO]")
     print(f"Vídeo gerado com sucesso em: {video_path}")
-    print(f"Thumbnail gerada com sucesso em: {THUMB_PATH}")
+
+    if THUMB_PATH.exists():
+        print(f"Thumbnail gerada com sucesso em: {THUMB_PATH}")
+    else:
+        print("[WARN] Thumbnail não foi criada, mas o vídeo foi gerado.")
 
 
 if __name__ == "__main__":

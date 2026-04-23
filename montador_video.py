@@ -1,27 +1,29 @@
 import os
-import base64
+import re
+import hashlib
 import subprocess
+from io import BytesIO
 from pathlib import Path
 from datetime import datetime
 from typing import List
 
+from dotenv import load_dotenv
 import requests
 from bs4 import BeautifulSoup
-from PIL import Image, ImageDraw, ImageFont, ImageEnhance, ImageFilter
+from PIL import Image, ImageDraw, ImageFont, ImageEnhance
 import mutagen.mp3
-from openai import OpenAI
 
+load_dotenv()
 
 PEXELS_API_KEY = os.getenv("PEXELS_API_KEY")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+PIXABAY_API_KEY = os.getenv("PIXABAY_API_KEY")
+UNSPLASH_ACCESS_KEY = os.getenv("UNSPLASH_ACCESS_KEY")
 
 OUTPUT_DIR = Path("videos_gerados")
 ASSETS_DIR = Path("assets")
 W, H = 1080, 1920
 
 OUTPUT_DIR.mkdir(exist_ok=True)
-
-client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 
 
 def extrair_contexto_da_materia(url: str, max_chars: int = 1200) -> str:
@@ -43,13 +45,20 @@ def extrair_contexto_da_materia(url: str, max_chars: int = 1200) -> str:
         return ""
 
 
-def gerar_query_imagem(noticia: dict):
+def limpar_query(query: str) -> str:
+    query = query.lower()
+    query = re.sub(r"[^\w\s]", "", query)
+    query = re.sub(r"\s+", " ", query)
+    return query.strip()
+
+
+def gerar_query_imagem(noticia: dict) -> str:
     titulo = (noticia.get("titulo") or "").lower()
     resumo = (noticia.get("resumo") or "").lower()
     texto = f"{titulo} {resumo}"
 
     if any(p in texto for p in ["governo", "lula", "bolsonaro", "presidente", "política", "congresso", "senado", "câmara"]):
-        return "brazil politics protest congress government"
+        return "brazil politics protest congress government crowd"
 
     if any(p in texto for p in ["crime", "polícia", "assalto", "prisão", "operação", "investigação"]):
         return "police operation arrest investigation brazil"
@@ -63,7 +72,7 @@ def gerar_query_imagem(noticia: dict):
     if any(p in texto for p in ["protesto", "manifestação", "rua", "crise"]):
         return "protest crowd tension street demonstration"
 
-    return "breaking news dramatic scene"
+    return "breaking news dramatic scene people crowd"
 
 
 def gerar_queries_alternativas(noticia: dict) -> List[str]:
@@ -73,8 +82,8 @@ def gerar_queries_alternativas(noticia: dict) -> List[str]:
 
     queries = [
         base,
-        titulo,
-        resumo[:80] if resumo else "",
+        limpar_query(titulo),
+        limpar_query(resumo[:100] if resumo else ""),
         f"{base} news",
         f"{base} brazil",
         "breaking news politics",
@@ -92,60 +101,22 @@ def gerar_queries_alternativas(noticia: dict) -> List[str]:
     return limpas
 
 
-def gerar_prompt_visual(noticia: dict, contexto_extra: str) -> str:
-    titulo = noticia.get("titulo", "")
-    resumo = noticia.get("resumo", "")
+def baixar_imagem(url: str, destino: Path) -> Path | None:
+    try:
+        resp = requests.get(url, timeout=25)
+        resp.raise_for_status()
 
-    return f"""
-Crie uma imagem em estilo fotojornalístico realista, vertical, para vídeo curto de notícias.
-
-Tema principal:
-{titulo}
-
-Resumo:
-{resumo}
-
-Contexto adicional:
-{contexto_extra}
-
-Diretrizes visuais:
-- cena coerente com notícia política ou factual
-- clima jornalístico
-- composição vertical forte
-- elementos visuais compatíveis com o tema
-- sem texto na imagem
-- sem letras
-- sem logos
-- sem marca d'água
-- aparência realista
-- iluminação cinematográfica
-- estilo foto de reportagem
-"""
-
-
-def gerar_imagem_ia_para_video(prompt: str, output_path: Path) -> Path:
-    if not client:
-        raise RuntimeError("OPENAI_API_KEY não configurada para geração de imagem IA.")
-
-    print("[IMG IA] Gerando imagem contextual para o vídeo...")
-
-    img = client.images.generate(
-        model="gpt-image-1",
-        prompt=prompt,
-        size="1024x1536"
-    )
-
-    b64 = img.data[0].b64_json
-    img_bytes = base64.b64decode(b64)
-    output_path.write_bytes(img_bytes)
-
-    print(f"[IMG IA] Imagem salva em: {output_path}")
-    return output_path
+        img = Image.open(BytesIO(resp.content)).convert("RGB")
+        img.save(destino, quality=95)
+        return destino
+    except Exception as e:
+        print(f"[IMG] Falha ao baixar imagem {url}: {e}")
+        return None
 
 
 def buscar_imagens_pexels(query: str, quantidade: int = 5, prefixo: str = "pexels") -> List[Path]:
-    print(f"[IMAGENS] Query Pexels: {query}")
-    print(f"[IMAGENS] PEXELS_API_KEY presente? {'SIM' if PEXELS_API_KEY else 'NAO'}")
+    print(f"[PEXELS] Query: {query}")
+    print(f"[PEXELS] PEXELS_API_KEY presente? {'SIM' if PEXELS_API_KEY else 'NAO'}")
 
     caminhos: List[Path] = []
 
@@ -163,27 +134,152 @@ def buscar_imagens_pexels(query: str, quantidade: int = 5, prefixo: str = "pexel
         }
 
         resp = requests.get(url, headers=headers, params=params, timeout=20)
-        print(f"[IMAGENS] Status Pexels: {resp.status_code}")
+        print(f"[PEXELS] Status: {resp.status_code}")
         resp.raise_for_status()
 
         fotos = resp.json().get("photos", [])
-        print(f"[IMAGENS] Fotos retornadas: {len(fotos)}")
+        print(f"[PEXELS] Fotos retornadas: {len(fotos)}")
 
         for i, foto in enumerate(fotos):
             img_url = foto["src"]["large2x"]
             img_path = OUTPUT_DIR / f"img_{prefixo}_{i}.jpg"
 
-            img_resp = requests.get(img_url, timeout=20)
-            img_resp.raise_for_status()
-            img_path.write_bytes(img_resp.content)
-            caminhos.append(img_path)
+            salvo = baixar_imagem(img_url, img_path)
+            if salvo:
+                caminhos.append(salvo)
 
-        print(f"[IMAGENS] Baixadas do Pexels: {len(caminhos)}")
+        print(f"[PEXELS] Baixadas: {len(caminhos)}")
 
     except Exception as e:
         print(f"[WARN] Falha no Pexels para query '{query}'. Detalhe: {e}")
 
     return caminhos
+
+
+def buscar_imagens_pixabay(query: str, quantidade: int = 5, prefixo: str = "pixabay") -> List[Path]:
+    query = limpar_query(query)
+
+    print(f"[PIXABAY] Query: {query}")
+    print(f"[PIXABAY] PIXABAY_API_KEY presente? {'SIM' if PIXABAY_API_KEY else 'NAO'}")
+
+    caminhos: List[Path] = []
+
+    if not PIXABAY_API_KEY:
+        return caminhos
+
+    try:
+        url = "https://pixabay.com/api/"
+        params = {
+            "key": PIXABAY_API_KEY,
+            "q": query,
+            "image_type": "photo",
+            "orientation": "vertical",
+            "per_page": quantidade,
+            "safesearch": "true",
+        }
+
+        resp = requests.get(url, params=params, timeout=25)
+        print(f"[PIXABAY] Status: {resp.status_code}")
+
+        if resp.status_code != 200:
+            print("[PIXABAY] Falha com query atual, tentando fallback genérico...")
+            params["q"] = "politics news"
+            resp = requests.get(url, params=params, timeout=25)
+            print(f"[PIXABAY] Status fallback: {resp.status_code}")
+
+        resp.raise_for_status()
+
+        hits = resp.json().get("hits", [])
+        print(f"[PIXABAY] Hits: {len(hits)}")
+
+        for i, hit in enumerate(hits):
+            img_url = hit.get("largeImageURL") or hit.get("webformatURL")
+            if not img_url:
+                continue
+
+            img_path = OUTPUT_DIR / f"img_{prefixo}_{i}.jpg"
+            salvo = baixar_imagem(img_url, img_path)
+            if salvo:
+                caminhos.append(salvo)
+
+        print(f"[PIXABAY] Baixadas: {len(caminhos)}")
+
+    except Exception as e:
+        print(f"[WARN] Falha no Pixabay para query '{query}'. Detalhe: {e}")
+
+    return caminhos
+
+
+def buscar_imagens_unsplash(query: str, quantidade: int = 5, prefixo: str = "unsplash") -> List[Path]:
+    print(f"[UNSPLASH] Query original: {query}")
+    print(f"[UNSPLASH] KEY presente? {'SIM' if UNSPLASH_ACCESS_KEY else 'NAO'}")
+
+    caminhos: List[Path] = []
+
+    if not UNSPLASH_ACCESS_KEY:
+        return caminhos
+
+    try:
+        query_limpa = limpar_query(query)
+        print(f"[UNSPLASH] Query limpa: {query_limpa}")
+
+        url = "https://api.unsplash.com/search/photos"
+        params = {
+            "query": query_limpa,
+            "per_page": quantidade,
+            "orientation": "portrait",
+        }
+        headers = {
+            "Authorization": f"Client-ID {UNSPLASH_ACCESS_KEY}"
+        }
+
+        resp = requests.get(url, headers=headers, params=params, timeout=20)
+        print(f"[UNSPLASH] Status: {resp.status_code}")
+
+        if resp.status_code != 200:
+            print("[UNSPLASH] Falha, tentando fallback genérico...")
+            params["query"] = "politics news"
+            resp = requests.get(url, headers=headers, params=params, timeout=20)
+            print(f"[UNSPLASH] Status fallback: {resp.status_code}")
+
+        resp.raise_for_status()
+
+        results = resp.json().get("results", [])
+        print(f"[UNSPLASH] Fotos retornadas: {len(results)}")
+
+        for i, item in enumerate(results):
+            img_url = item["urls"]["regular"]
+            img_path = OUTPUT_DIR / f"img_{prefixo}_{i}.jpg"
+
+            salvo = baixar_imagem(img_url, img_path)
+            if salvo:
+                caminhos.append(salvo)
+
+        print(f"[UNSPLASH] Baixadas: {len(caminhos)}")
+
+    except Exception as e:
+        print(f"[WARN] Falha Unsplash: {e}")
+
+    return caminhos
+
+
+def deduplicar_por_hash(caminhos: List[Path]) -> List[Path]:
+    unicos: List[Path] = []
+    hashes = set()
+
+    for caminho in caminhos:
+        try:
+            conteudo = caminho.read_bytes()
+            h = hashlib.md5(conteudo).hexdigest()
+            if h not in hashes:
+                hashes.add(h)
+                unicos.append(caminho)
+            else:
+                caminho.unlink(missing_ok=True)
+        except Exception:
+            unicos.append(caminho)
+
+    return unicos
 
 
 def gerar_frames_dinamicos_de_uma_imagem(base_path: Path, quantidade: int = 5) -> List[Path]:
@@ -230,31 +326,59 @@ def gerar_frames_dinamicos_de_uma_imagem(base_path: Path, quantidade: int = 5) -
     return variacoes
 
 
-def buscar_imagens_pexels_multiplas(noticia: dict, quantidade_total: int = 4) -> List[Path]:
+def buscar_imagens_multi_banco(noticia: dict, quantidade_total: int = 5) -> List[Path]:
     queries = gerar_queries_alternativas(noticia)
     coletadas: List[Path] = []
-    vistos = set()
 
     for idx, query in enumerate(queries):
-        faltam = quantidade_total - len(coletadas)
-        if faltam <= 0:
+        if len(coletadas) >= quantidade_total:
             break
 
-        resultados = buscar_imagens_pexels(
+        faltam = quantidade_total - len(coletadas)
+
+        resultados_pexels = buscar_imagens_pexels(
             query=query,
-            quantidade=min(3, faltam),
-            prefixo=f"q{idx}"
+            quantidade=min(2, faltam),
+            prefixo=f"pexels_q{idx}"
         )
+        coletadas.extend(resultados_pexels)
 
-        for p in resultados:
-            key = str(p.resolve())
-            if key not in vistos:
-                vistos.add(key)
-                coletadas.append(p)
+        if len(coletadas) >= quantidade_total:
+            break
 
-        print(f"[IMAGENS] Total acumulado após query {idx + 1}: {len(coletadas)}")
+        faltam = quantidade_total - len(coletadas)
 
-    return coletadas[:quantidade_total]
+        resultados_unsplash = buscar_imagens_unsplash(
+            query=query,
+            quantidade=min(2, faltam),
+            prefixo=f"unsplash_q{idx}"
+        )
+        coletadas.extend(resultados_unsplash)
+
+        if len(coletadas) >= quantidade_total:
+            break
+
+        faltam = quantidade_total - len(coletadas)
+
+        resultados_pixabay = buscar_imagens_pixabay(
+            query=query,
+            quantidade=min(2, faltam),
+            prefixo=f"pixabay_q{idx}"
+        )
+        coletadas.extend(resultados_pixabay)
+
+    coletadas = deduplicar_por_hash(coletadas)
+
+    finais: List[Path] = []
+    vistos = set()
+    for p in coletadas:
+        key = str(p.resolve())
+        if key not in vistos:
+            vistos.add(key)
+            finais.append(p)
+
+    print(f"[MULTI-BANCO] Total final: {len(finais)}")
+    return finais[:quantidade_total]
 
 
 def buscar_imagens_locais(quantidade: int = 5) -> List[Path]:
@@ -267,61 +391,11 @@ def buscar_imagens_locais(quantidade: int = 5) -> List[Path]:
     return locais[:quantidade]
 
 
-def gerar_variacoes_de_imagem(base_path: Path, quantidade: int = 4) -> List[Path]:
-    if not base_path.exists():
-        return []
-
-    print(f"[IMAGENS] Gerando {quantidade} variações a partir de: {base_path}")
-
-    base = Image.open(base_path).convert("RGB")
-    variacoes: List[Path] = []
-
-    for i in range(quantidade):
-        img = base.copy()
-
-        if i == 0:
-            img = ImageEnhance.Contrast(img).enhance(1.08)
-        elif i == 1:
-            w, h = img.size
-            img = img.crop((int(w * 0.05), int(h * 0.03), int(w * 0.95), int(h * 0.97)))
-            img = img.resize((w, h), Image.LANCZOS)
-        elif i == 2:
-            img = ImageEnhance.Brightness(img).enhance(0.92)
-        elif i == 3:
-            w, h = img.size
-            img = img.crop((0, int(h * 0.02), int(w * 0.92), int(h * 0.98)))
-            img = img.resize((w, h), Image.LANCZOS)
-            img = ImageEnhance.Sharpness(img).enhance(1.15)
-        else:
-            img = img.filter(ImageFilter.GaussianBlur(radius=0.3))
-
-        path = OUTPUT_DIR / f"img_var_{i}.jpg"
-        img.save(path, quality=95)
-        variacoes.append(path)
-
-    return variacoes
-
-
 def obter_frames_visuais(noticia: dict, quantidade_total: int = 5) -> List[Path]:
     quantidade_total = max(3, quantidade_total)
     frames: List[Path] = []
 
-    url = noticia.get("url", "") or noticia.get("link", "")
-    contexto_extra = extrair_contexto_da_materia(url) if url else ""
-
-    img_ia_path = OUTPUT_DIR / "img_ia_0.jpg"
-    prompt_visual = gerar_prompt_visual(noticia, contexto_extra)
-
-    try:
-        gerar_imagem_ia_para_video(prompt_visual, img_ia_path)
-        frames.append(img_ia_path)
-    except Exception as e:
-        print(f"[IMG IA] Falha ao gerar imagem IA: {e}")
-
-    faltam = max(0, quantidade_total - len(frames))
-    if faltam > 0:
-        pexels = buscar_imagens_pexels_multiplas(noticia, quantidade_total=faltam)
-        frames.extend(pexels)
+    frames.extend(buscar_imagens_multi_banco(noticia, quantidade_total=quantidade_total))
 
     if len(frames) < quantidade_total:
         faltam = quantidade_total - len(frames)
@@ -392,8 +466,6 @@ def agrupar_legendas(palavras, max_palavras=2, max_chars=16):
 
 
 def gerar_srt_simples(texto: str, audio_path: Path) -> Path:
-    import re
-
     duracao = mutagen.mp3.MP3(str(audio_path)).info.length
     texto = re.sub(r"\s+", " ", texto).strip()
     palavras = texto.split()
@@ -403,7 +475,7 @@ def gerar_srt_simples(texto: str, audio_path: Path) -> Path:
         grupos = [texto]
 
     dur_por_grupo = max((duracao / len(grupos)) * 0.90, 0.55)
-    adiantamento = 0.8
+    adiantamento = 0.16
 
     srt_path = audio_path.with_suffix(".srt")
 

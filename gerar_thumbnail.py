@@ -1,40 +1,79 @@
-import os
-import base64
-import textwrap
 from pathlib import Path
-from PIL import Image, ImageDraw, ImageFont, ImageEnhance
-from openai import OpenAI
+from typing import List, Tuple
+from PIL import Image, ImageDraw, ImageFont, ImageEnhance, ImageStat
+import textwrap
+import cv2
+import numpy as np
 
 OUTPUT_DIR = Path("videos_gerados")
 OUTPUT_DIR.mkdir(exist_ok=True)
 
 OUTPUT = OUTPUT_DIR / "thumb.jpg"
-BASE_IMG = OUTPUT_DIR / "thumb_base.png"
 
 WIDTH, HEIGHT = 1280, 720
 
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+# =========================
+# SELEÇÃO INTELIGENTE
+# =========================
+def listar_frames() -> List[Path]:
+    frames = sorted(OUTPUT_DIR.glob("frame_*.jpg"))
+    return frames
 
 
-def gerar_imagem_base(prompt: str) -> Path:
-    print("[THUMB] Gerando imagem base com IA...")
+def score_imagem(path: Path) -> float:
+    img = cv2.imread(str(path))
 
-    img = client.images.generate(
-        model="gpt-image-1",
-        prompt=prompt,
-        size="1536x1024"
+    if img is None:
+        return 0
+
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+    # brilho
+    brilho = np.mean(gray)
+
+    # contraste
+    contraste = np.std(gray)
+
+    # detecção de rosto
+    face_cascade = cv2.CascadeClassifier(
+        cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
     )
+    faces = face_cascade.detectMultiScale(gray, 1.1, 4)
 
-    b64 = img.data[0].b64_json
-    img_bytes = base64.b64decode(b64)
-    BASE_IMG.write_bytes(img_bytes)
+    score_rosto = 50 if len(faces) > 0 else 0
 
-    return BASE_IMG
+    score_final = brilho + contraste + score_rosto
+
+    return score_final
 
 
-def quebrar_texto(texto, largura=18, max_linhas=3):
-    linhas = textwrap.wrap(texto.upper(), width=largura)
-    return linhas[:max_linhas]
+def escolher_melhor_imagem() -> Path:
+    frames = listar_frames()
+
+    if not frames:
+        raise RuntimeError("Nenhum frame encontrado")
+
+    ranking: List[Tuple[Path, float]] = []
+
+    for f in frames:
+        s = score_imagem(f)
+        ranking.append((f, s))
+        print(f"[THUMB] Score {f.name}: {s:.2f}")
+
+    ranking.sort(key=lambda x: x[1], reverse=True)
+
+    melhor = ranking[0][0]
+    print(f"[THUMB] Melhor frame escolhido: {melhor}")
+
+    return melhor
+
+
+# =========================
+# TEXTO
+# =========================
+def quebrar_texto(texto):
+    return textwrap.wrap(texto.upper(), width=16)[:3]
 
 
 def desenhar_texto(img, texto):
@@ -42,80 +81,56 @@ def desenhar_texto(img, texto):
 
     try:
         fonte = ImageFont.truetype("arialbd.ttf", 82)
-    except Exception:
+    except:
         fonte = ImageFont.load_default()
 
-    linhas = quebrar_texto(texto, largura=16, max_linhas=3)
+    linhas = quebrar_texto(texto)
 
-    altura_total = 0
-    medidas = []
+    y = HEIGHT - 260
+
     for linha in linhas:
-        bbox = draw.textbbox((0, 0), linha, font=fonte)
-        w = bbox[2] - bbox[0]
-        h = bbox[3] - bbox[1]
-        medidas.append((linha, w, h))
-        altura_total += h + 8
-
-    y = HEIGHT - altura_total - 50
-
-    for linha, w, h in medidas:
+        w = draw.textlength(linha, font=fonte)
         x = (WIDTH - w) // 2
 
-        for dx in [-3, -2, -1, 1, 2, 3]:
-            for dy in [-3, -2, -1, 1, 2, 3]:
+        # sombra
+        for dx in [-3, 3]:
+            for dy in [-3, 3]:
                 draw.text((x + dx, y + dy), linha, font=fonte, fill="black")
 
         draw.text((x, y), linha, font=fonte, fill="white")
-        y += h + 8
+        y += 90
 
 
-def gerar_prompt_thumb(headline: str) -> str:
-    return f"""
-Crie uma thumbnail realista e cinematográfica para YouTube sobre notícia.
-
-Tema:
-{headline}
-
-Diretrizes:
-- composição horizontal 16:9
-- personagem principal em destaque, close-up
-- expressão intensa ou dramática
-- fundo relacionado ao tema da notícia
-- iluminação cinematográfica
-- alto contraste
-- visual impactante de thumbnail de canal grande
-- sem texto na imagem
-- sem letras
-- sem logos
-- sem tarja vermelha
-- sem marca d'água
-- aparência realista
-"""
-
-
+# =========================
+# GERAÇÃO FINAL
+# =========================
 def gerar_thumbnail(headline: str):
-    prompt = gerar_prompt_thumb(headline)
-    base_img_path = gerar_imagem_base(prompt)
+    print("[THUMB] Gerando thumbnail...")
 
-    img = Image.open(base_img_path).convert("RGB")
-    img = img.resize((WIDTH, HEIGHT), Image.LANCZOS)
+    base = escolher_melhor_imagem()
 
-    # contraste e nitidez leves
-    img = ImageEnhance.Contrast(img).enhance(1.10)
-    img = ImageEnhance.Sharpness(img).enhance(1.08)
+    img = Image.open(base).convert("RGB")
 
-    # sombreado suave na parte inferior para leitura do texto
+    # crop central
+    img = img.resize((1280, 720))
+
+    # melhorar qualidade
+    img = ImageEnhance.Contrast(img).enhance(1.15)
+    img = ImageEnhance.Sharpness(img).enhance(1.1)
+
+    # overlay escuro
     overlay = Image.new("RGBA", (WIDTH, HEIGHT), (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
-    draw.rectangle([0, HEIGHT - 230, WIDTH, HEIGHT], fill=(0, 0, 0, 110))
+    draw.rectangle([0, HEIGHT - 250, WIDTH, HEIGHT], fill=(0, 0, 0, 120))
 
     img = Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
 
     desenhar_texto(img, headline)
 
     img.save(OUTPUT, quality=95)
-    print(f"[THUMB] Thumbnail gerada com sucesso em: {OUTPUT}")
+
+    print(f"[THUMB] OK: {OUTPUT}")
 
 
 if __name__ == "__main__":
-    gerar_thumbnail("Crise política explode no Brasil")
+    gerar_thumbnail("Teste thumbnail")
