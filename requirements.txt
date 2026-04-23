@@ -7,6 +7,9 @@ google-auth-httplib2
 python-dotenv
 Pillow
 mutagen
-Pillow
 beautifulsoup4
 google-genai
+edge-tts
+opencv-python
+numpy
+openai

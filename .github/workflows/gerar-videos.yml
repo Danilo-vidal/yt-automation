@@ -48,6 +48,10 @@ jobs:
           pip install edge-tts
           pip install openai Pillow
           pip install google-genai
+          pip install beautifulsoup4 openai
+          pip install opencv-python numpy
+          pip install google-api-python-client google-auth-oauthlib google-auth-httplib2
+          
 
       - name: Limpar cache de notícias
         shell: powershell
